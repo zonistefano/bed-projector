@@ -249,6 +249,9 @@ uint16_t eeprom_glucose_low = 70;     // Default low threshold in mg/dL
 uint8_t eeprom_glucose_unit = 0;      // Glucose display unit: 0=mg/dL, 1=mmol/L
 uint32_t eeprom_pwm_frequency = 200;  // Default PWM frequency in Hz (range 10-78000)
 uint16_t eeprom_max_power = MAX_DUTY; // Default max power (range 1-1023)
+// Board revision read-only key in NVS:
+// versions A, B, C, D, E and F are revision 0; version H is revision 1.
+uint8_t eeprom_board_rev = 0;
 
 // LibreLinkUp settings
 uint8_t eeprom_libre_region = 0; // 0=disabled, 1=US, 2=Japan, 3=Rest of World
@@ -490,7 +493,8 @@ void ESP_LOG_WEB(esp_log_level_t level, const char *tag, const char *format, ...
 
 void ESP_LOGI_STACK(const char *tag, const char *msg)
 {
-  ESP_LOG_WEB(ESP_LOG_INFO, tag, "%s heap %lu stack %u", msg, esp_get_free_heap_size(), uxTaskGetStackHighWaterMark(NULL));
+  size_t stack_free_bytes = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+  ESP_LOG_WEB(ESP_LOG_INFO, tag, "%s heap %lu stack %u bytes", msg, esp_get_free_heap_size(), (unsigned)stack_free_bytes);
 }
 
 void startup_diags(void)
@@ -607,6 +611,12 @@ void startup_read_eeprom(void)
   }
   else
   {
+    err = nvs_get_u8(nvs_handle, "eeprom_board_rev", &eeprom_board_rev);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND)
+    {
+      ESP_LOG_WEB(ESP_LOG_WARN, TAG, "NVS Read Error eeprom_board_rev: %s", esp_err_to_name(err));
+    }
+
     for (int i = 0; i < SETTINGS_COUNT; i++)
     {
       const nvs_setting_t *s = &settings_table[i];
@@ -653,6 +663,14 @@ void startup_read_eeprom(void)
     {
       eeprom_max_power = MAX_DUTY;
       ESP_LOG_WEB(ESP_LOG_INFO, TAG, "Reduced max_power from 850 to %u", eeprom_max_power);
+    }
+
+    if (eeprom_board_rev == 1)
+    {
+      if (eeprom_pwm_frequency == 200)
+        eeprom_pwm_frequency = 33333;
+      if (eeprom_max_power == 750)
+        eeprom_max_power = 1023;
     }
 
     // Initialize current POH counter and last save time
@@ -901,7 +919,7 @@ void startup_threads()
   xTaskCreatePinnedToCore(
       display_task,   /* Task function. */
       "display_task", /* name of task, from f-display.c */
-      8192 + 2048,    /* Stack size of task */
+      8960,           /* Stack size of task (reduced proportionally) */
       NULL,           /* parameter of the task */
       3,              /* priority of the task */
       NULL,           /* Task handle to keep track of created task */
@@ -913,7 +931,7 @@ void startup_threads()
   xTaskCreatePinnedToCore(
       wifi_task,
       "wifi_task",
-      8192,
+      7168,
       NULL,
       3,
       NULL,

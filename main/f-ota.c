@@ -778,12 +778,13 @@ static void ota_update_task(void *pvParameters)
             if (wifi_connected)
             {
                 // Log stack high water mark before update
-                UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-                ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "OTA update starting - Stack high water mark: %d", uxHighWaterMark);
+                size_t stack_free_bytes = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+                ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "OTA update starting - Stack free: %u bytes", (unsigned)stack_free_bytes);
                 f_ota_check_update();
 
                 // Log stack high water mark after update
-                uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+                stack_free_bytes = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+                ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "OTA update finished - Stack free: %u bytes", (unsigned)stack_free_bytes);
             }
             else
             {
@@ -809,7 +810,7 @@ void f_ota_start_update_thread(void)
     BaseType_t xReturned = xTaskCreatePinnedToCore(
         ota_update_task,
         "ota_update_task",
-        8192,
+        7168,
         NULL,
         3,
         &ota_update_task_handle,
@@ -824,8 +825,8 @@ void f_ota_start_update_thread(void)
     }
 
     // Enable stack monitoring for the OTA update task
-    UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(ota_update_task_handle);
-    ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "OTA update task created with initial stack high water mark: %d", uxHighWaterMark);
+    size_t stack_free_bytes = uxTaskGetStackHighWaterMark(ota_update_task_handle) * sizeof(StackType_t);
+    ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "OTA update task created with initial stack free: %u bytes", (unsigned)stack_free_bytes);
 }
 
 void f_ota_stop_update_thread(void)
