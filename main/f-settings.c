@@ -2040,7 +2040,7 @@ esp_err_t status_api_handler(httpd_req_t *req)
 
     // Add sensor and location data
     // Add sensor data
-    double lux = ltr303_get_frixos_lux();
+    double lux = 10;
     lux = round(lux * 100.0) / 100.0; // Round to 2 decimal places
     cJSON_AddNumberToObject(root, "lux", lux);
     cJSON_AddStringToObject(root, "latitude", my_lat);

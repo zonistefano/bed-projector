@@ -1,34 +1,44 @@
 {
-    "C_Cpp.intelliSenseEngine": "default",
-    "idf.espIdfPathWin": "c:\\Espressif\\frameworks\\esp-idf-v5.4",
-    "idf.openOcdConfigs": [
-        "board/esp32-wrover-kit-3.3v.cfg"
-    ],
-    "idf.portWin": "COM6",
-    "idf.toolsPathWin": "c:\\Espressif\\tools",
-    "idf.flashType": "UART",
-    "files.associations": {
-        "sdkconfig.h": "c",
-        "semphr.h": "c",
-        "esp_chip_info.h": "c",
-        "frixos.h": "c",
-        "f-wifi.h": "c",
-        "esp_lcd_st7735.h": "c",
-        "esp_lcd_panel_vendor.h": "c",
-        "f-provisioning.h": "c",
-        "lv_fsdrv.h": "c",
-        "f-pwm.h": "c",
-        "esp_log.h": "c",
-        "esp_http_client.h": "c",
-        "task.h": "c",
-        "f-time.h": "c",
-        "time.h": "c",
-        "nvs_flash.h": "c",
-        "esp_timer.h": "c",
-        "cstdlib": "c",
-        "f-dexcom.h": "c",
-        "lv_image_decoder.h": "c"
-    },
-    "idf.pythonInstallPath": "c:\\Espressif\\tools\\tools\\idf-python\\3.11.2\\python.exe",
-    "idf.currentSetup": "c:\\Espressif\\frameworks\\esp-idf-v5.4"
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPathWin": "c:\\Espressif\\frameworks\\esp-idf-v5.4",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.portWin": "COM6",
+  "idf.toolsPathWin": "c:\\Espressif\\tools",
+  "idf.flashType": "UART",
+  "files.associations": {
+    "sdkconfig.h": "c",
+    "semphr.h": "c",
+    "esp_chip_info.h": "c",
+    "frixos.h": "c",
+    "f-wifi.h": "c",
+    "esp_lcd_st7735.h": "c",
+    "esp_lcd_panel_vendor.h": "c",
+    "f-provisioning.h": "c",
+    "lv_fsdrv.h": "c",
+    "f-pwm.h": "c",
+    "esp_log.h": "c",
+    "esp_http_client.h": "c",
+    "task.h": "c",
+    "f-time.h": "c",
+    "time.h": "c",
+    "nvs_flash.h": "c",
+    "esp_timer.h": "c",
+    "cstdlib": "c",
+    "f-dexcom.h": "c",
+    "lv_image_decoder.h": "c"
+  },
+  "idf.currentSetup": "/Users/stefanozoni/.espressif/v5.4.4/esp-idf",
+  "clangd.path": "/Users/stefanozoni/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/Users/stefanozoni/Documents/PlatformIO/bed-projector/build"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "idf.port": "/dev/tty.usbmodem1101",
+  "idf.monitorPort": "/dev/tty.usbmodem1101"
 }

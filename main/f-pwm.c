@@ -12,9 +12,9 @@ void startup_led_pwm()
     gpio_set_level(GPIO_NUM_0, 1); // Force HIGH after boot
 
     // and prepare IO32
-    gpio_reset_pin(GPIO_NUM_32);
-    gpio_set_direction(GPIO_NUM_32, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode(GPIO_NUM_32, GPIO_FLOATING); // Ensure no pull-ups or pull-downs;
+    gpio_reset_pin(GPIO_NUM_3);
+    gpio_set_direction(GPIO_NUM_3, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(GPIO_NUM_3, GPIO_FLOATING); // Ensure no pull-ups or pull-downs;
 
     // Configure the LEDC peripheral
     ledc_mode_t mode = LEDC_LOW_SPEED_MODE;
@@ -37,14 +37,14 @@ void startup_led_pwm()
         .channel = channel, // Use channel 0
         .timer_sel = timer, // Use timer 0
         .intr_type = LEDC_INTR_DISABLE,
-        .gpio_num = 32, // LED GPIO pin is pin32
+        .gpio_num = 3, // LED GPIO pin is pin3
         .duty = eeprom_max_power,   // Start with LED at high
         .hpoint = 0};
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
     // set_led_pwm_brightness(eeprom_brightness_LED[0]); // Set initial brightness
 
-    ESP_LOG_WEB(ESP_LOG_INFO, TAG, "PWM LED GPIO32 %lu Hz 10bit", (unsigned long)eeprom_pwm_frequency);
+    ESP_LOG_WEB(ESP_LOG_INFO, TAG, "PWM LED GPIO3 %lu Hz 10bit", (unsigned long)eeprom_pwm_frequency);
 }
 
 // Reconfigure PWM frequency (called when settings are updated)

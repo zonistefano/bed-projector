@@ -35,7 +35,5 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/main/config.h.in
                ${CMAKE_CURRENT_SOURCE_DIR}/main/include/config.h @ONLY)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(frixos)
+project(bed-projector)
 spiffs_create_partition_image(spiffs ./spiffs FLASH_IN_PROJECT)
-
-# Remove the idf_component_register call from here - it belongs only in component directories

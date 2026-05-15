@@ -311,9 +311,6 @@ double weather_3day_high = -100.0;         // °C, max instant temperature over 
 double weather_3day_low  =  100.0;         // °C, min instant temperature over today + next 2 calendar days
 
 i2c_master_bus_handle_t i2c_bus;
-ltr303_dev_t ltr_dev;
-char ltr303_gain = 7;             // gain of x7
-char ltr303_integration_time = 3; // 500ms
 
 CircularLog weblog = {0}; // Explicitly initialize to zero
 
@@ -781,53 +778,6 @@ esp_err_t write_nvs_parameters(void)
   return err;
 }
 
-double ltr303_get_frixos_lux()
-{
-  uint16_t ch0 = 0, ch1 = 0;
-  if (!ltr303_get_data(&ltr_dev, &ch0, &ch1))
-  {
-    ESP_LOG_WEB(ESP_LOG_WARN, TAG, "LTR303 Failed reading data. Error=%d", ltr303_get_error(&ltr_dev));
-  };
-
-  double lux = 0.0;
-  // get reading from ALS sensor
-  ltr303_get_lux(ltr303_gain, ltr303_integration_time, ch0, ch1, &lux);
-  ESP_LOG_WEB(ESP_LOG_VERBOSE, TAG, "LTR303 reading: %.2lf = %d, %d", lux, ch0, ch1);
-  return lux;
-}
-
-void startup_ltr303(void)
-{
-
-  // 3) Initialize the LTR303 device with new driver
-  ltr303_init(&ltr_dev, i2c_bus, LTR303_DEFAULT_I2C_ADDR);
-
-  // 4) Check if device is present
-  if (!ltr303_begin(&ltr_dev))
-  {
-    ESP_LOG_WEB(ESP_LOG_ERROR, TAG, "LTR303 not responding!");
-    return;
-  }
-
-  // 5) Power up sensor
-  ltr303_set_power_up(&ltr_dev);
-
-  // set gain
-  ltr303_set_control(&ltr_dev, ltr303_gain, true, true);
-  // Set measurement rate (integrationTime=3 => 400ms, measurementRate=3 => 500ms)
-  ltr303_set_measurement_rate(&ltr_dev, 3, 3);
-
-  uint8_t part_id = 0;
-  if (ltr303_get_part_id(&ltr_dev, &part_id))
-  {
-    ESP_LOG_WEB(ESP_LOG_INFO, TAG, "LTR 303 available, ID %d", part_id);
-  }
-  else
-  {
-    ESP_LOG_WEB(ESP_LOG_ERROR, TAG, "LTR 303 not available");
-  }
-}
-
 // OTA progress callback function
 void ota_progress_callback(int progress, const char *message)
 {
@@ -1011,7 +961,6 @@ void app_main(void)
   startup_diags();
 
   startup_read_eeprom();
-  startup_ltr303();
   startup_lcd();
   startup_lvgl();
   startup_spiffs();

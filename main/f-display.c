@@ -933,18 +933,11 @@ static void handle_als_and_brightness(uint32_t loop_counter)
   if (loop_counter % 100 == 1)
   {
     // Get the current lux value
-    lux = ltr303_get_frixos_lux();
+    lux = 10;
     int8_t pwmpct = -1;
     uint8_t old_font_index = font_index;
 
-    if (lux > eeprom_lux_threshold + eeprom_lux_sensitivity)
-      font_index = 0;
-    else if (lux < eeprom_lux_threshold - eeprom_lux_sensitivity)
-      font_index = 1;
-
-    // if dim_disable is enabled or we are in manufacturer mode, force full brightness
-    if (eeprom_dim_disable || manufacturer_mode)
-      font_index = 0; // force full brightness
+    font_index = 0; // force full brightness
 
     pwmpct = eeprom_brightness_LED[font_index];
     if (font_index != old_font_index)

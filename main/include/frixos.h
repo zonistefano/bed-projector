@@ -50,8 +50,6 @@ Main task stack size
 #include "driver/spi_master.h"
 #include "driver/ledc.h"
 
-#include "ltr303.h"
-
 #include "lvgl.h"
 #include "font/lv_font.h"
 
@@ -60,10 +58,6 @@ extern const char app[];
 extern const char version[];
 extern const int fwversion;
 extern const char revision[];
-
-extern ltr303_dev_t ltr_dev;
-extern char ltr303_gain;
-extern char ltr303_integration_time;
 
 // NVS - EEPROM parameters
 #define EEPROM_NAMESPACE "frixos"
@@ -202,17 +196,17 @@ extern char boot_ip_address[18];
 #define LCD_BL_ON_LEVEL     (1)
 
 /* LCD pins */
-#define LCD_GPIO_SCLK       (GPIO_NUM_18)
-#define LCD_GPIO_MOSI       (GPIO_NUM_23)
-#define LCD_GPIO_RST        (GPIO_NUM_4)
-#define LCD_GPIO_DC         (GPIO_NUM_2)
-#define LCD_GPIO_CS         (GPIO_NUM_5)
-#define LCD_GPIO_BL         (GPIO_NUM_26)
+#define LCD_GPIO_SCLK       (GPIO_NUM_13)
+#define LCD_GPIO_MOSI       (GPIO_NUM_10)
+#define LCD_GPIO_RST        (GPIO_NUM_9)
+#define LCD_GPIO_DC         (GPIO_NUM_12)
+#define LCD_GPIO_CS         (GPIO_NUM_11)
+#define LCD_GPIO_BL         (GPIO_NUM_7)
 
 
 // I2C Stuff
-#define I2C_MASTER_SDA_IO   (GPIO_NUM_21)
-#define I2C_MASTER_SCL_IO   (GPIO_NUM_22)
+#define I2C_MASTER_SDA_IO   (GPIO_NUM_10)
+#define I2C_MASTER_SCL_IO   (GPIO_NUM_13)
 #define I2C_MASTER_FREQ_HZ  (100*1000) // 100 kHz
 
 
@@ -250,9 +244,6 @@ bool init_circular_log(CircularLog *log, int capacity);
 void append_to_log(CircularLog *log, const char *message);
 void get_log_content(CircularLog *log, char *output, int max_len);
 void free_circular_log(CircularLog *log); // Function to free allocated memory
-
-// internal function to read LTR303 brightness sensor
-double ltr303_get_frixos_lux();
 
 void startup_read_eeprom(void);
 // Function to write all parameters to NVS
