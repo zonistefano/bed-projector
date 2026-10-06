@@ -1,0 +1,9 @@
+managed_components/
+build/
+sdkconfig.old
+main/include/config.h
+
+# Local secrets and Python bytecode
+.env
+__pycache__/
+*.pyc

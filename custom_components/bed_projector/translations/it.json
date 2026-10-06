@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Collega Bed Projector",
+        "data": {
+          "host": "Host o indirizzo IP",
+          "port": "Porta",
+          "token": "Token locale"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile raggiungere il dispositivo o token non valido"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dati da proiettare",
+        "data": {
+          "openings": "Sensore numero porte/finestre aperte (es. sensor.number_open_contacts)",
+          "alarm": "Centrale d'allarme",
+          "weather": "Entità meteo",
+          "entity1": "Dato aggiuntivo 1",
+          "entity2": "Dato aggiuntivo 2",
+          "entity3": "Dato aggiuntivo 3",
+          "entity4": "Dato aggiuntivo 4"
+        }
+      }
+    }
+  }
+}

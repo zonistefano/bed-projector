@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bed Projector</title>
+  <link rel="stylesheet" href="/index.css">
+  <script src="/index.js" defer></script>
+</head>
+<body>
+  <header><h1>Bed Projector</h1><p>Orologio e stato della casa</p></header>
+  <main>
+    <section id="login" class="card">
+      <h2>Accesso</h2>
+      <p>Inserisci <code>API_TOKEN</code> dal tuo file <code>.env</code>. Se stai configurando senza credenziali compilate e sei collegato all'access point del proiettore, puoi usare “Abbina”.</p>
+      <label for="token">Token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false">
+      <div class="actions"><button id="login-button">Accedi</button><button id="pair-button" type="button">Abbina</button></div>
+    </section>
+    <div id="app" hidden>
+      <section class="card">
+        <h2>Proiezione</h2>
+        <p id="state-summary" aria-live="polite"></p>
+        <div class="row"><label for="power">Accesa</label><input id="power" type="checkbox"></div>
+        <label for="brightness">Luminosità <output id="brightness-value">30%</output></label>
+        <input id="brightness" type="range" min="1" max="100" value="30">
+        <div class="actions"><button id="brightness-save">Applica luminosità</button></div>
+        <label for="current-page">Pagina</label>
+        <select id="current-page"></select>
+        <div class="actions"><button id="previous-page">Precedente</button><button id="next-page">Successiva</button></div>
+      </section>
+      <section class="card">
+        <h2>Centraggio e bordi</h2>
+        <p>Avvia la regolazione: sulla proiezione appariranno una croce e il bordo circolare. Sposta il centro e cambia il diametro finché il cerchio coincide con l'area visibile. Le modifiche si applicano a tutte le pagine dopo il salvataggio.</p>
+        <p id="calibration-summary" aria-live="polite"></p>
+        <div class="actions"><button id="calibration-start">Avvia regolazione</button></div>
+        <div class="calibration-controls">
+          <div class="calibration-direction">
+            <button id="calibration-up" type="button" aria-label="Sposta in alto">↑</button>
+            <div><button id="calibration-left" type="button" aria-label="Sposta a sinistra">←</button><button id="calibration-right" type="button" aria-label="Sposta a destra">→</button></div>
+            <button id="calibration-down" type="button" aria-label="Sposta in basso">↓</button>
+          </div>
+          <div><span>Diametro visibile</span><div class="actions"><button id="calibration-smaller" type="button">− Riduci</button><button id="calibration-larger" type="button">+ Aumenta</button></div></div>
+        </div>
+        <div class="actions"><button id="calibration-save">Salva regolazione</button><button id="calibration-cancel" type="button">Annulla</button></div>
+      </section>
+      <section class="card">
+        <h2>Pagine</h2>
+        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine e assegnare tre widget a ciascuna.</p>
+        <div id="pages"></div>
+        <div class="actions"><button id="add-page">Aggiungi pagina</button><button id="save-pages">Salva pagine</button></div>
+      </section>
+      <section class="card">
+        <h2>Home Assistant</h2>
+        <p>Installa il componente incluso in questo progetto. Configura lì porte, finestre, allarme, meteo e quattro dati aggiuntivi.</p>
+        <label for="ha-token">Token locale per Home Assistant</label>
+        <input id="ha-token" type="password" readonly autocomplete="off" spellcheck="false">
+        <div class="actions"><button id="show-ha-token" type="button">Mostra e seleziona token</button></div>
+        <p class="hint">Copia il valore selezionato e incollalo nella configurazione dell'integrazione. Conservalo come una password.</p>
+        <p id="ha-summary" aria-live="polite"></p>
+      </section>
+      <section class="card">
+        <h2>Rete e fuso orario</h2>
+        <p>Con <code>WIFI_SSID</code> e <code>WIFI_PASSWORD</code> nel file <code>.env</code>, la rete è già configurata. Questa sezione serve per cambiarla dal browser. Se stai usando l'access point, copia prima il token: dopo il riavvio e il cambio di indirizzo dovrai inserirlo di nuovo. Il salvataggio riavvia il dispositivo.</p>
+        <label for="ssid">Nome rete Wi-Fi</label><input id="ssid" maxlength="32" autocomplete="off">
+        <label for="wifi-password">Password Wi-Fi</label><input id="wifi-password" type="password" maxlength="63" autocomplete="new-password">
+        <label for="timezone">Fuso orario POSIX</label><input id="timezone" value="CET-1CEST,M3.5.0,M10.5.0/3" maxlength="127">
+        <div class="actions"><button id="save-network">Salva rete</button></div>
+      </section>
+      <section class="card">
+        <h2>Aggiornamento firmware</h2>
+        <p>Carica un file firmware .bin compilato per questa scheda. In caso di errore, il firmware attuale resta attivo.</p>
+        <input id="firmware" type="file" accept=".bin,application/octet-stream">
+        <div class="actions"><button id="upload-firmware">Carica firmware</button></div>
+      </section>
+      <section class="card"><button id="logout">Disconnetti</button></section>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>

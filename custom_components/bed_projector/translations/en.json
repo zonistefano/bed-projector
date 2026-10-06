@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Bed Projector",
+        "data": {
+          "host": "Host or IP address",
+          "port": "Port",
+          "token": "Local token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the device or token is invalid"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Data to project",
+        "data": {
+          "openings": "Open doors/windows count sensor (e.g. sensor.number_open_contacts)",
+          "alarm": "Alarm control panel",
+          "weather": "Weather entity",
+          "entity1": "Additional data 1",
+          "entity2": "Additional data 2",
+          "entity3": "Additional data 3",
+          "entity4": "Additional data 4"
+        }
+      }
+    }
+  }
+}

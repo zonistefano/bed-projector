@@ -1,0 +1,6 @@
+dependencies:
+  idf:
+    version: ">=5.4.4,<5.5"
+  lvgl/lvgl: "9.5.0"
+  espressif/esp_lvgl_port: "2.7.2"
+  espressif/mdns: "1.10.0"
