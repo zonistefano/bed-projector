@@ -9,6 +9,7 @@ from typing import Any
 
 from aiohttp import ClientError, ClientTimeout
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -70,12 +71,29 @@ class ProjectorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await asyncio.sleep(0.2)
             selected = self.watched_entities()
             states = {entity_id: self.hass.states.get(entity_id) for entity_id in selected}
-            payload = make_snapshot(states, self.entry.options)
+            payload = make_snapshot(states, self.entry.options, await self._daily_forecast())
             try:
                 await self.request("POST", "/api/v1/ha/state", payload)
             except UpdateFailed:
                 # A later event or the periodic full snapshot will retry.
                 pass
+
+    async def _daily_forecast(self) -> list[dict[str, Any]] | None:
+        """Today's forecast first; weather entities expose it only through a service call."""
+        entity_id = self.entry.options.get(CONF_WEATHER)
+        if not isinstance(entity_id, str) or not entity_id:
+            return None
+        for kind in ("daily", "twice_daily"):
+            try:
+                response = await self.hass.services.async_call(
+                    "weather", "get_forecasts", {"entity_id": entity_id, "type": kind},
+                    blocking=True, return_response=True)
+            except HomeAssistantError:
+                continue  # The provider does not support this forecast type.
+            forecast = (response or {}).get(entity_id, {}).get("forecast")
+            if forecast:
+                return forecast
+        return None
 
     async def async_stop(self) -> None:
         if self.push_task and not self.push_task.done():

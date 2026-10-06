@@ -1,5 +1,7 @@
 #include "bed_display.h"
+#include "bed_icons.h"
 #include "projector.h"
+#include "projector_logic.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -27,13 +29,16 @@ static lv_obj_t *projection;
 static lv_obj_t *calibration_ring;
 static lv_obj_t *calibration_horizontal;
 static lv_obj_t *calibration_vertical;
+static lv_obj_t *calibration_top;
 static lv_obj_t *header;
 static lv_obj_t *main_label;
 static lv_obj_t *lines[3];
+static lv_obj_t *weather_icon;
+static lv_obj_t *temp_high;
+static lv_obj_t *temp_low;
 static lv_obj_t *door_icon;
-static lv_obj_t *alarm_icon;
 static lv_obj_t *door_count;
-static lv_obj_t *alarm_text;
+static lv_obj_t *alarm_icon;
 static bool provisioning;
 static char ap_ssid[33];
 static char ap_password[17];
@@ -49,25 +54,49 @@ static const lv_font_t *const time_fonts[] = {&lv_font_montserrat_36, &lv_font_m
     &lv_font_montserrat_24, &lv_font_montserrat_20, &lv_font_montserrat_14, &lv_font_montserrat_12};
 static const lv_font_t *const text_fonts[] = {&lv_font_montserrat_14, &lv_font_montserrat_12,
     &lv_font_montserrat_10, &lv_font_montserrat_8};
+static const lv_font_t *const icon_fonts[] = {&bed_icons_22, &bed_icons_18, &bed_icons_14};
 #define ARRAY_COUNT(items) ((int)(sizeof(items) / sizeof((items)[0])))
 
+/* Icons match Home Assistant's alarm_control_panel state icons. */
 typedef struct {
-    const char *state, *short_label, *label;
+    const char *state, *icon, *label;
     uint32_t color;
 } alarm_mode_t;
 
 static const alarm_mode_t alarm_modes[] = {
-    {"disarmed", "OFF", "Disinserito", 0x607080},
-    {"armed_home", "CASA", "In casa", 0xffd040},
-    {"armed_away", "FUORI", "Fuori casa", 0xffa000},
-    {"armed_night", "NOTTE", "Notte", 0x8090ff},
-    {"armed_vacation", "VACANZA", "Vacanza", 0xffa000},
-    {"armed_custom_bypass", "PERS.", "Personalizzato", 0xffa000},
-    {"arming", "INS...", "Inserimento...", 0xffd040},
-    {"pending", "ATTESA", "In attesa", 0xff6020},
-    {"triggered", "SCATTATO", "SCATTATO", 0xff3030},
+    {"disarmed", BED_ICON_SHIELD_OFF, "Disinserito", 0x607080},
+    {"armed_home", BED_ICON_SHIELD_HOME, "In casa", 0xffd040},
+    {"armed_away", BED_ICON_SHIELD_LOCK, "Fuori casa", 0xffa000},
+    {"armed_night", BED_ICON_SHIELD_MOON, "Notte", 0x8090ff},
+    {"armed_vacation", BED_ICON_SHIELD_AIRPLANE, "Vacanza", 0xffa000},
+    {"armed_custom_bypass", BED_ICON_SECURITY, "Personalizzato", 0xffa000},
+    {"arming", BED_ICON_SHIELD, "Inserimento...", 0xffd040},
+    {"pending", BED_ICON_SHIELD_OUTLINE, "In attesa", 0xff6020},
+    {"triggered", BED_ICON_BELL_RING, "SCATTATO", 0xff3030},
 };
-static const alarm_mode_t alarm_unknown = {"unknown", "?", "?", 0x607080};
+static const alarm_mode_t alarm_unknown = {"unknown", BED_ICON_SHIELD, "?", 0x404850};
+
+/* Icons match the Home Assistant frontend's weather condition icons. */
+static const struct {
+    const char *condition, *icon;
+    uint32_t color;
+} weather_icons[] = {
+    {"clear-night", BED_ICON_WEATHER_NIGHT, 0x8090ff},
+    {"cloudy", BED_ICON_WEATHER_CLOUDY, 0xc0c8d0},
+    {"exceptional", BED_ICON_ALERT_CIRCLE_OUTLINE, 0xff6020},
+    {"fog", BED_ICON_WEATHER_FOG, 0xc0c8d0},
+    {"hail", BED_ICON_WEATHER_HAIL, 0xa0d0ff},
+    {"lightning", BED_ICON_WEATHER_LIGHTNING, 0xffd040},
+    {"lightning-rainy", BED_ICON_WEATHER_LIGHTNING_RAINY, 0xffd040},
+    {"partlycloudy", BED_ICON_WEATHER_PARTLY_CLOUDY, 0xffe080},
+    {"pouring", BED_ICON_WEATHER_POURING, 0x60a0ff},
+    {"rainy", BED_ICON_WEATHER_RAINY, 0x80b0ff},
+    {"snowy", BED_ICON_WEATHER_SNOWY, 0xffffff},
+    {"snowy-rainy", BED_ICON_WEATHER_SNOWY_RAINY, 0xa0d0ff},
+    {"sunny", BED_ICON_WEATHER_SUNNY, 0xffd040},
+    {"windy", BED_ICON_WEATHER_WINDY, 0xc0c8d0},
+    {"windy-variant", BED_ICON_WEATHER_WINDY_VARIANT, 0xc0c8d0},
+};
 
 static const alarm_mode_t *alarm_mode(const projector_snapshot_t *s)
 {
@@ -167,55 +196,108 @@ static void text_widget(const char *name, const projector_snapshot_t *s,
     } else out[0] = 0;
 }
 
-/* Clock page bottom row: [door] count  (alarm) mode, centred and shrunk as one group. */
-static void render_status_row(const projector_snapshot_t *s, int diameter)
+/* One item of a centred clock-page row: an icon glyph or a short text. */
+typedef struct {
+    lv_obj_t *obj;
+    const char *text;
+    bool icon;
+    uint32_t color;
+    int gap; /* space before the item */
+} row_item_t;
+
+static void hide_clock_rows(void)
 {
-    enum { DOOR_W = 10, DOOR_H = 13, DOT = 10, PAD = 3, GAP = 8 };
-    char count[4] = "?";
-    if (s->ha_fresh && s->openings_known) snprintf(count, sizeof(count), "%u", s->openings);
-    const alarm_mode_t *alarm = alarm_mode(s);
-    int y = scaled(diameter, 67), slot = 16;
-    int first = diameter >= 104 ? 0 : 1;
+    lv_obj_t *const objects[] = {weather_icon, temp_high, temp_low, door_icon, door_count, alarm_icon};
+    for (int i = 0; i < ARRAY_COUNT(objects); ++i) show(objects[i], false);
+}
+
+/* Centre the items in the circle, shrinking icons and text together until the row fits. */
+static void layout_row(const row_item_t *items, int count, int diameter, int y, int slot)
+{
     int available = circle_half_width(diameter, y, slot) * 2;
-    const lv_font_t *font = text_fonts[first];
-    for (int i = first; i < ARRAY_COUNT(text_fonts); ++i) {
-        font = text_fonts[i];
-        int total = DOOR_W + PAD + text_width(count, font) + GAP + DOT + PAD +
-                    text_width(alarm->short_label, font);
+    int first_icon = slot >= 22 ? 0 : slot >= 18 ? 1 : 2;
+    int first_text = diameter >= 104 ? 1 : 2;
+    int levels = ARRAY_COUNT(text_fonts) - first_text;
+    if (ARRAY_COUNT(icon_fonts) - first_icon > levels) levels = ARRAY_COUNT(icon_fonts) - first_icon;
+    const lv_font_t *icon_font = NULL, *text_font = NULL;
+    int total = 0;
+    for (int level = 0; level < levels; ++level) {
+        int icon = first_icon + level, text = first_text + level;
+        icon_font = icon_fonts[icon < ARRAY_COUNT(icon_fonts) ? icon : ARRAY_COUNT(icon_fonts) - 1];
+        text_font = text_fonts[text < ARRAY_COUNT(text_fonts) ? text : ARRAY_COUNT(text_fonts) - 1];
+        total = 0;
+        for (int i = 0; i < count; ++i)
+            total += (i ? items[i].gap : 0) + text_width(items[i].text, items[i].icon ? icon_font : text_font);
         if (total <= available) break;
     }
-    int height = lv_font_get_line_height(font);
-    int count_width = text_width(count, font);
-    int fixed = DOOR_W + PAD + count_width + GAP + DOT + PAD;
-    int alarm_width = text_width(alarm->short_label, font);
-    if (fixed + alarm_width > available) alarm_width = available - fixed > 1 ? available - fixed : 1;
-    int x = diameter / 2 - (fixed + alarm_width) / 2;
-    int middle = y + slot / 2;
-    lv_obj_set_pos(door_icon, x, middle - DOOR_H / 2);
-    x += DOOR_W + PAD;
-    lv_obj_set_style_text_font(door_count, font, 0);
-    lv_label_set_text(door_count, count);
-    lv_obj_set_pos(door_count, x, middle - height / 2);
-    x += count_width + GAP;
-    lv_obj_set_pos(alarm_icon, x, middle - DOT / 2);
-    x += DOT + PAD;
-    lv_obj_set_style_text_font(alarm_text, font, 0);
-    lv_label_set_text(alarm_text, alarm->short_label);
-    lv_obj_set_pos(alarm_text, x, middle - height / 2);
-    lv_obj_set_size(alarm_text, alarm_width, height);
-    lv_obj_set_style_bg_color(alarm_icon, lv_color_hex(alarm->color), 0);
-    lv_obj_set_style_border_color(door_icon,
-        lv_color_hex(!s->ha_fresh || !s->openings_known ? 0x607080 :
-                     s->openings ? 0xffa000 : 0x80c080), 0);
-    show(door_icon, true); show(alarm_icon, true);
-    show(door_count, true); show(alarm_text, true);
+    int x = diameter / 2 - total / 2, middle = y + slot / 2;
+    for (int i = 0; i < count; ++i) {
+        const lv_font_t *font = items[i].icon ? icon_font : text_font;
+        int width = text_width(items[i].text, font), height = lv_font_get_line_height(font);
+        if (i) x += items[i].gap;
+        lv_obj_set_style_text_font(items[i].obj, font, 0);
+        lv_obj_set_style_text_color(items[i].obj, lv_color_hex(items[i].color), 0);
+        lv_label_set_text(items[i].obj, items[i].text);
+        lv_obj_set_pos(items[i].obj, x, middle - height / 2);
+        lv_obj_set_size(items[i].obj, width, height);
+        show(items[i].obj, true);
+        x += width;
+    }
+}
+
+/* Clock page top row: today's forecast icon with maximum and minimum temperature. */
+static void render_weather_row(const projector_snapshot_t *s, int diameter)
+{
+    const char *icon = NULL;
+    uint32_t color = 0;
+    for (int i = 0; s->ha_fresh && i < ARRAY_COUNT(weather_icons); ++i)
+        if (!strcmp(s->condition, weather_icons[i].condition)) {
+            icon = weather_icons[i].icon;
+            color = weather_icons[i].color;
+        }
+    show(weather_icon, false); show(temp_high, false); show(temp_low, false);
+    if (!icon) return;
+    char high[12], low[12];
+    snprintf(high, sizeof(high), "%d\xC2\xB0", s->temp_high);
+    snprintf(low, sizeof(low), "%d\xC2\xB0", s->temp_low);
+    row_item_t items[3] = {{weather_icon, icon, true, color, 0}};
+    int count = 1;
+    if (s->temp_high_known) items[count++] = (row_item_t){temp_high, high, false, 0xffb070, 3};
+    if (s->temp_low_known) items[count++] = (row_item_t){temp_low, low, false, 0x80b0ff, 4};
+    layout_row(items, count, diameter, scaled(diameter, 11), scaled(diameter, 20));
+}
+
+/* Clock page row under the time: open doors (only when any is open) and the alarm icon. */
+static void render_status_row(const projector_snapshot_t *s, int diameter)
+{
+    bool known = s->ha_fresh && s->openings_known;
+    char count[4] = "?";
+    if (known) snprintf(count, sizeof(count), "%u", s->openings);
+    const alarm_mode_t *alarm = alarm_mode(s);
+    row_item_t items[3];
+    int n = 0;
+    show(door_icon, false); show(door_count, false);
+    /* An unusable count must never look like "all closed", so it shows as a grey "?". */
+    if (!known || s->openings) {
+        uint32_t color = known ? 0xffa000 : 0x607080;
+        items[n++] = (row_item_t){door_icon, BED_ICON_DOOR_OPEN, true, color, 0};
+        items[n++] = (row_item_t){door_count, count, false, color, 2};
+    }
+    items[n++] = (row_item_t){alarm_icon, alarm->icon, true, alarm->color, 10};
+    layout_row(items, n, diameter, scaled(diameter, 70), diameter >= 112 ? 18 : 14);
 }
 
 static void render(const projector_snapshot_t *s)
 {
+    /* The panel is rotated/mirrored in hardware, so the saved center is mapped
+     * to keep the circle on the same physical pixels in every orientation. */
     int diameter = s->calibration.diameter;
-    int left = s->calibration.center_x - diameter / 2;
-    int top = s->calibration.center_y - diameter / 2;
+    int center_x, center_y;
+    projector_orientation_center(s->calibration.rotation, s->calibration.mirror,
+                                 s->calibration.center_x, s->calibration.center_y,
+                                 diameter, &center_x, &center_y);
+    int left = center_x - diameter / 2;
+    int top = center_y - diameter / 2;
     bool calibrating = s->calibration.active && !provisioning;
     lv_obj_set_pos(projection, left, top);
     lv_obj_set_size(projection, diameter, diameter);
@@ -223,13 +305,16 @@ static void render(const projector_snapshot_t *s)
     show(calibration_ring, calibrating);
     show(calibration_horizontal, calibrating);
     show(calibration_vertical, calibrating);
+    show(calibration_top, calibrating);
     if (calibrating) {
         lv_obj_set_pos(calibration_ring, left, top);
         lv_obj_set_size(calibration_ring, diameter, diameter);
-        lv_obj_set_pos(calibration_horizontal, left + 4, s->calibration.center_y - 1);
+        lv_obj_set_pos(calibration_horizontal, left + 4, center_y - 1);
         lv_obj_set_size(calibration_horizontal, diameter - 8, 2);
-        lv_obj_set_pos(calibration_vertical, s->calibration.center_x - 1, top + 4);
+        lv_obj_set_pos(calibration_vertical, center_x - 1, top + 4);
         lv_obj_set_size(calibration_vertical, 2, diameter - 8);
+        /* Text shows both the rotation and the mirroring of the content. */
+        lv_obj_set_pos(calibration_top, center_x + 6, top + diameter / 4 - 7);
         return;
     }
     const projector_page_t *page = &s->pages[s->page_index];
@@ -242,8 +327,7 @@ static void render(const projector_snapshot_t *s)
         snprintf(ap_lines[0], sizeof(ap_lines[0]), "%s", ap_ssid);
         snprintf(ap_lines[1], sizeof(ap_lines[1]), "%.8s", ap_password);
         snprintf(ap_lines[2], sizeof(ap_lines[2]), "%s", ap_password + 8);
-        show(door_icon, false); show(alarm_icon, false);
-        show(door_count, false); show(alarm_text, false);
+        hide_clock_rows();
         for (int i = 0; i < 3; ++i) {
             lv_obj_set_style_text_align(lines[i], LV_TEXT_ALIGN_CENTER, 0);
             fit_circle_label(lines[i], ap_lines[i], diameter, scaled(diameter, 45 + i * 22), 15,
@@ -264,15 +348,15 @@ static void render(const projector_snapshot_t *s)
             localtime_r(&now, &local);
             snprintf(time_text, sizeof(time_text), "%02d:%02d", local.tm_hour, local.tm_min);
         }
-        fit_circle_label(main_label, time_text, diameter, scaled(diameter, 30),
+        fit_circle_label(main_label, time_text, diameter, scaled(diameter, 33),
                          diameter >= 120 ? 42 : diameter >= 104 ? 32 : 18,
                          time_fonts, ARRAY_COUNT(time_fonts));
+        render_weather_row(s, diameter);
         render_status_row(s, diameter);
     } else {
         fit_circle_label(header, page->name, diameter, scaled(diameter, 18), 16,
                          text_fonts, ARRAY_COUNT(text_fonts));
-        show(door_icon, false); show(alarm_icon, false);
-        show(door_count, false); show(alarm_text, false);
+        hide_clock_rows();
     }
     int row = 0;
     for (int i = 0; i < PROJECTOR_MAX_WIDGETS; ++i) {
@@ -284,7 +368,7 @@ static void render(const projector_snapshot_t *s)
         lv_obj_set_style_text_align(lines[row], clock ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
         int first_font = diameter >= 112 && weather_layout && row == 0 ? 0 : 1;
         fit_circle_label(lines[row], value, diameter, scaled(diameter,
-            clock ? 89 : weather_layout ? 34 + row * 27 : 35 + row * 27), 16,
+            clock ? 90 : weather_layout ? 34 + row * 27 : 35 + row * 27), 16,
             text_fonts + first_font, ARRAY_COUNT(text_fonts) - first_font);
         show(lines[row], true);
         ++row;
@@ -292,11 +376,21 @@ static void render(const projector_snapshot_t *s)
     for (; row < 3; ++row) show(lines[row], false);
 }
 
+static void apply_orientation(unsigned rotation, bool mirror)
+{
+    bool swap_xy, mirror_x, mirror_y;
+    projector_orientation_panel(rotation, mirror, &swap_xy, &mirror_x, &mirror_y);
+    esp_lcd_panel_swap_xy(lcd_panel, swap_xy);
+    esp_lcd_panel_mirror(lcd_panel, mirror_x, mirror_y);
+    lv_obj_invalidate(lv_screen_active());
+}
+
 static void display_task(void *argument)
 {
     (void)argument;
     bool last_power = false;
     uint8_t last_brightness = 0;
+    int last_orientation = -1;
     while (true) {
         projector_tick();
         projector_snapshot_t snapshot;
@@ -310,6 +404,11 @@ static void display_task(void *argument)
             last_power = snapshot.power;
         }
         if (lvgl_port_lock(1000)) {
+            int orientation = snapshot.calibration.rotation | (snapshot.calibration.mirror ? 4 : 0);
+            if (orientation != last_orientation) {
+                apply_orientation(snapshot.calibration.rotation, snapshot.calibration.mirror);
+                last_orientation = orientation;
+            }
             render(&snapshot);
             lvgl_port_unlock();
         }
@@ -372,22 +471,12 @@ esp_err_t bed_display_init(void)
     lv_obj_set_style_text_font(main_label, &lv_font_montserrat_36, 0);
     lv_label_set_long_mode(main_label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(main_label, LV_TEXT_ALIGN_CENTER, 0);
-    door_icon = lv_obj_create(projection);
-    lv_obj_set_size(door_icon, 10, 13);
-    lv_obj_set_pos(door_icon, 10, 74);
-    lv_obj_set_style_bg_opa(door_icon, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(door_icon, 2, 0);
-    lv_obj_set_style_radius(door_icon, 0, 0);
-    alarm_icon = lv_obj_create(projection);
-    lv_obj_set_size(alarm_icon, 10, 10);
-    lv_obj_set_pos(alarm_icon, 64, 76);
-    lv_obj_set_style_radius(alarm_icon, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(alarm_icon, 0, 0);
-    door_count = lv_label_create(projection);
-    lv_obj_set_pos(door_count, 25, 73);
-    alarm_text = lv_label_create(projection);
-    lv_label_set_long_mode(alarm_text, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_pos(alarm_text, 80, 73);
+    lv_obj_t **row_labels[] = {&weather_icon, &temp_high, &temp_low, &door_icon, &door_count, &alarm_icon};
+    for (int i = 0; i < ARRAY_COUNT(row_labels); ++i) {
+        *row_labels[i] = lv_label_create(projection);
+        lv_label_set_long_mode(*row_labels[i], LV_LABEL_LONG_MODE_CLIP);
+        show(*row_labels[i], false);
+    }
     for (int i = 0; i < 3; ++i) {
         lines[i] = lv_label_create(projection);
         lv_obj_set_size(lines[i], 120, 20);
@@ -410,9 +499,13 @@ esp_err_t bed_display_init(void)
     lv_obj_remove_style_all(calibration_vertical);
     lv_obj_set_style_bg_color(calibration_vertical, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(calibration_vertical, LV_OPA_COVER, 0);
+    calibration_top = lv_label_create(screen);
+    lv_obj_set_style_text_font(calibration_top, &lv_font_montserrat_12, 0);
+    lv_label_set_text(calibration_top, "SU");
     show(calibration_ring, false);
     show(calibration_horizontal, false);
     show(calibration_vertical, false);
+    show(calibration_top, false);
     lvgl_port_unlock();
     return ESP_OK;
 }

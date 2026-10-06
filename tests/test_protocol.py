@@ -60,6 +60,22 @@ class SnapshotTests(unittest.TestCase):
         result = protocol.make_snapshot({"binary_sensor.door": state("off")}, options)
         self.assertFalse(result["openings_known"])
 
+    def test_today_forecast_condition_and_range(self):
+        options = {"weather": "weather.home"}
+        states = {"weather.home": state("cloudy", temperature=18.4)}
+        forecast = [{"condition": "rainy", "temperature": 21.5, "templow": -3.5},
+                    {"condition": "sunny", "temperature": 25, "templow": 12}]
+        result = protocol.make_snapshot(states, options, forecast)
+        self.assertEqual((result["condition"], result["temp_high"], result["temp_low"]), ("rainy", 22, -4))
+
+    def test_forecast_falls_back_to_current_condition(self):
+        options = {"weather": "weather.home"}
+        result = protocol.make_snapshot({"weather.home": state("sunny")}, options)
+        self.assertEqual((result["condition"], result["temp_high"], result["temp_low"]), ("sunny", None, None))
+        result = protocol.make_snapshot({"weather.home": state("unavailable")}, options,
+                                        [{"condition": "storm", "temperature": "n/a"}])
+        self.assertEqual((result["condition"], result["temp_high"]), ("", None))
+
     def test_strings_fit_firmware_byte_buffers(self):
         options = {"entity1": "sensor.long", "weather": "weather.home"}
         states = {

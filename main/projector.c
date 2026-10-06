@@ -228,6 +228,10 @@ esp_err_t projector_init(void)
         state.calibration.center_y = geometry[1];
         state.calibration.diameter = geometry[2];
     }
+    if (nvs_get_u8(handle, "proj_orient", &value) == ESP_OK && value < 8) {
+        state.calibration.rotation = value & 3;
+        state.calibration.mirror = value & 4;
+    }
     saved_calibration = state.calibration;
     size_t size = sizeof(tz_value);
     if (nvs_get_str(handle, "timezone", tz_value, &size) != ESP_OK || !tz_value[0])
@@ -285,6 +289,8 @@ void projector_snapshot(projector_snapshot_t *out)
         strcpy(out->alarm, "unknown");
         out->weather[0] = 0;
         out->temperature[0] = 0;
+        out->condition[0] = 0;
+        out->temp_high_known = out->temp_low_known = false;
         for (unsigned i = 0; i < PROJECTOR_EXTRA_VALUES; ++i) out->extras[i][0] = 0;
     }
     xSemaphoreGive(lock);
@@ -388,6 +394,18 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     return err;
 }
 
+/* Optional whole-degree forecast temperature: absent or null means unknown. */
+static bool parse_degrees(const cJSON *item, bool *known, int16_t *value)
+{
+    *known = false;
+    if (!item || cJSON_IsNull(item)) return true;
+    if (!cJSON_IsNumber(item) || item->valuedouble != item->valueint ||
+        item->valueint < -99 || item->valueint > 199) return false;
+    *known = true;
+    *value = item->valueint;
+    return true;
+}
+
 esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_size)
 {
     const cJSON *openings = cJSON_GetObjectItemCaseSensitive(root, "openings");
@@ -396,6 +414,12 @@ esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_si
     const cJSON *weather = cJSON_GetObjectItemCaseSensitive(root, "weather");
     const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(root, "temperature");
     const cJSON *extras = cJSON_GetObjectItemCaseSensitive(root, "extras");
+    const cJSON *condition = cJSON_GetObjectItemCaseSensitive(root, "condition");
+    bool high_known, low_known;
+    int16_t high = 0, low = 0;
+    if (!parse_degrees(cJSON_GetObjectItemCaseSensitive(root, "temp_high"), &high_known, &high) ||
+        !parse_degrees(cJSON_GetObjectItemCaseSensitive(root, "temp_low"), &low_known, &low) ||
+        (condition && (!cJSON_IsString(condition) || strlen(condition->valuestring) > 15))) goto invalid;
     if (!cJSON_IsBool(openings_known) || !cJSON_IsNumber(openings) || openings->valuedouble != openings->valueint ||
         openings->valueint < 0 || openings->valueint > 99 || !cJSON_IsString(alarm) ||
         strlen(alarm->valuestring) > 23 || !cJSON_IsString(weather) ||
@@ -420,6 +444,11 @@ esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_si
     strcpy(state.alarm, alarm->valuestring);
     strcpy(state.weather, weather->valuestring);
     strcpy(state.temperature, temperature->valuestring);
+    strcpy(state.condition, condition ? condition->valuestring : "");
+    state.temp_high_known = high_known;
+    state.temp_high = high;
+    state.temp_low_known = low_known;
+    state.temp_low = low;
     memcpy(state.extras, parsed_extras, sizeof(parsed_extras));
     ha_received_us = esp_timer_get_time();
     xSemaphoreGive(lock);
@@ -481,16 +510,22 @@ esp_err_t projector_set_calibration(const cJSON *root, char *error, size_t error
     const cJSON *x = cJSON_GetObjectItemCaseSensitive(root, "center_x");
     const cJSON *y = cJSON_GetObjectItemCaseSensitive(root, "center_y");
     const cJSON *diameter = cJSON_GetObjectItemCaseSensitive(root, "diameter");
+    const cJSON *rotation = cJSON_GetObjectItemCaseSensitive(root, "rotation");
+    const cJSON *mirror = cJSON_GetObjectItemCaseSensitive(root, "mirror");
+    bool rotation_valid = !rotation || (cJSON_IsNumber(rotation) &&
+        (rotation->valuedouble == 0 || rotation->valuedouble == 90 ||
+         rotation->valuedouble == 180 || rotation->valuedouble == 270));
     bool adjust = !mode && x && y && diameter &&
         cJSON_IsNumber(x) && cJSON_IsNumber(y) && cJSON_IsNumber(diameter) &&
         x->valuedouble == x->valueint && y->valuedouble == y->valueint &&
         diameter->valuedouble == diameter->valueint &&
-        projector_calibration_valid(x->valueint, y->valueint, diameter->valueint);
-    bool action = cJSON_IsString(mode) && !x && !y && !diameter &&
+        projector_calibration_valid(x->valueint, y->valueint, diameter->valueint) &&
+        rotation_valid && (!mirror || cJSON_IsBool(mirror));
+    bool action = cJSON_IsString(mode) && !x && !y && !diameter && !rotation && !mirror &&
         (!strcmp(mode->valuestring, "start") || !strcmp(mode->valuestring, "save") ||
          !strcmp(mode->valuestring, "cancel"));
     if (!adjust && !action) {
-        snprintf(error, error_size, "Invalid circle geometry or action");
+        snprintf(error, error_size, "Invalid circle geometry, orientation or action");
         return ESP_ERR_INVALID_ARG;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
@@ -499,6 +534,8 @@ esp_err_t projector_set_calibration(const cJSON *root, char *error, size_t error
         state.calibration.center_x = x->valueint;
         state.calibration.center_y = y->valueint;
         state.calibration.diameter = diameter->valueint;
+        if (rotation) state.calibration.rotation = rotation->valueint / 90;
+        if (mirror) state.calibration.mirror = cJSON_IsTrue(mirror);
     } else if (action && !strcmp(mode->valuestring, "start")) {
         state.calibration = saved_calibration;
         state.calibration.active = true;
@@ -507,10 +544,12 @@ esp_err_t projector_set_calibration(const cJSON *root, char *error, size_t error
     } else if (action && !strcmp(mode->valuestring, "save") && state.calibration.active) {
         uint8_t geometry[3] = {state.calibration.center_x, state.calibration.center_y,
                                state.calibration.diameter};
+        uint8_t orientation = state.calibration.rotation | (state.calibration.mirror ? 4 : 0);
         nvs_handle_t handle;
         err = nvs_open(NS, NVS_READWRITE, &handle);
         if (err == ESP_OK) {
             err = nvs_set_blob(handle, "proj_circle", geometry, sizeof(geometry));
+            if (err == ESP_OK) err = nvs_set_u8(handle, "proj_orient", orientation);
             if (err == ESP_OK) err = nvs_commit(handle);
             nvs_close(handle);
         }

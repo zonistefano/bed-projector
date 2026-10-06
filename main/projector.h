@@ -22,6 +22,8 @@ typedef struct {
     uint8_t center_x;
     uint8_t center_y;
     uint8_t diameter;
+    uint8_t rotation; /* Quarter turns, 0-3. */
+    bool mirror;
     bool active;
 } projector_calibration_t;
 
@@ -37,6 +39,11 @@ typedef struct {
     char alarm[24];
     char weather[32];
     char temperature[16];
+    char condition[16];
+    bool temp_high_known;
+    bool temp_low_known;
+    int16_t temp_high;
+    int16_t temp_low;
     char extras[PROJECTOR_EXTRA_VALUES][32];
     bool wifi_connected;
     projector_calibration_t calibration;

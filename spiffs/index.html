@@ -30,8 +30,8 @@
         <div class="actions"><button id="previous-page">Precedente</button><button id="next-page">Successiva</button></div>
       </section>
       <section class="card">
-        <h2>Centraggio e bordi</h2>
-        <p>Avvia la regolazione: sulla proiezione appariranno una croce e il bordo circolare. Sposta il centro e cambia il diametro finché il cerchio coincide con l'area visibile. Le modifiche si applicano a tutte le pagine dopo il salvataggio.</p>
+        <h2>Centraggio e orientamento</h2>
+        <p>Avvia la regolazione: sulla proiezione appariranno una croce, il bordo circolare e la scritta “SU”. Sposta il centro e cambia il diametro finché il cerchio coincide con l'area visibile, poi ruota o specchia finché “SU” è leggibile e in alto. Le modifiche si applicano a tutte le pagine dopo il salvataggio.</p>
         <p id="calibration-summary" aria-live="polite"></p>
         <div class="actions"><button id="calibration-start">Avvia regolazione</button></div>
         <div class="calibration-controls">
@@ -41,6 +41,7 @@
             <button id="calibration-down" type="button" aria-label="Sposta in basso">↓</button>
           </div>
           <div><span>Diametro visibile</span><div class="actions"><button id="calibration-smaller" type="button">− Riduci</button><button id="calibration-larger" type="button">+ Aumenta</button></div></div>
+          <div><span>Orientamento</span><div class="actions"><button id="calibration-rotate" type="button">↻ Ruota 90°</button><button id="calibration-mirror" type="button">⇋ Specchia</button></div></div>
         </div>
         <div class="actions"><button id="calibration-save">Salva regolazione</button><button id="calibration-cancel" type="button">Annulla</button></div>
       </section>

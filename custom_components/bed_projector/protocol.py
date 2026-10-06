@@ -10,8 +10,29 @@ def short(value: Any, max_bytes: int) -> str:
     return str(value or "").encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
 
 
-def make_snapshot(states: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-    """Build one complete state update; absent or unavailable inputs stay unknown."""
+WEATHER_CONDITIONS = {
+    "clear-night", "cloudy", "exceptional", "fog", "hail", "lightning", "lightning-rainy",
+    "partlycloudy", "pouring", "rainy", "snowy", "snowy-rainy", "sunny", "windy", "windy-variant",
+}
+
+
+def whole_degrees(value: Any) -> int | None:
+    """Round a forecast temperature for the display; non-numeric values are unknown."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not -99 <= number <= 199:
+        return None
+    return int(number + 0.5) if number >= 0 else -int(-number + 0.5)
+
+
+def make_snapshot(states: dict[str, Any], options: dict[str, Any],
+                  forecast: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Build one complete state update; absent or unavailable inputs stay unknown.
+
+    forecast is the daily list from weather.get_forecasts; its first entry is today.
+    """
     # One numeric sensor (e.g. sensor.number_open_contacts) already counts open contacts.
     openings_id = options.get("openings")
     openings_entity = states.get(openings_id) if isinstance(openings_id, str) else None
@@ -40,6 +61,12 @@ def make_snapshot(states: dict[str, Any], options: dict[str, Any]) -> dict[str, 
         if value is not None:
             temperature = short(f"{value}{unit}", 15)
 
+    today = forecast[0] if forecast and isinstance(forecast[0], dict) else {}
+    condition = today.get("condition") or (weather_entity.state if weather_entity else "")
+    condition = condition if condition in WEATHER_CONDITIONS else ""
+    temp_high = whole_degrees(today.get("temperature")) if condition else None
+    temp_low = whole_degrees(today.get("templow")) if condition else None
+
     extras = []
     for key in ("entity1", "entity2", "entity3", "entity4"):
         entity = states.get(options.get(key, ""))
@@ -55,5 +82,8 @@ def make_snapshot(states: dict[str, Any], options: dict[str, Any]) -> dict[str, 
         "alarm": alarm,
         "weather": weather,
         "temperature": temperature,
+        "condition": condition,
+        "temp_high": temp_high,
+        "temp_low": temp_low,
         "extras": extras,
     }

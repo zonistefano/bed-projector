@@ -186,6 +186,8 @@ static cJSON *calibration_json(void)
     cJSON_AddNumberToObject(root, "center_x", snapshot.calibration.center_x);
     cJSON_AddNumberToObject(root, "center_y", snapshot.calibration.center_y);
     cJSON_AddNumberToObject(root, "diameter", snapshot.calibration.diameter);
+    cJSON_AddNumberToObject(root, "rotation", snapshot.calibration.rotation * 90);
+    cJSON_AddBoolToObject(root, "mirror", snapshot.calibration.mirror);
     cJSON_AddBoolToObject(root, "active", snapshot.calibration.active);
     return root;
 }

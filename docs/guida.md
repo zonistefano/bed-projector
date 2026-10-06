@@ -104,12 +104,12 @@ Per installare senza HACS, copia **l'intera cartella** `custom_components/bed_pr
 | --- | --- | --- |
 | Sensore numero porte/finestre aperte | Un `sensor` numerico, per esempio `sensor.number_open_contacts` | Il valore intero (0–99) è il numero di aperture. Se il sensore è indisponibile o non numerico, il conteggio è sconosciuto. |
 | Centrale d'allarme | Un `alarm_control_panel` | Distingue disinserito, in casa, fuori casa, notte, vacanza, personalizzato, inserimento, attesa e scattato. |
-| Entità meteo | Una `weather` | Stato meteo e temperatura, se l'entità fornisce l'attributo `temperature`. |
+| Entità meteo | Una `weather` | Stato meteo e temperatura, se l'entità fornisce l'attributo `temperature`. Per la pagina Ora l'integrazione legge anche la previsione giornaliera (o, in mancanza, quella a 12 ore) con `weather.get_forecasts`. |
 | Dati aggiuntivi 1–4 | Fino a quattro entità HA | Nome, valore e unità vengono mostrati dai widget `entity1`–`entity4`. |
 
 Chi aggiorna da una versione precedente (lista di `binary_sensor`) deve riaprire **Configura** e scegliere il sensore numerico: fino ad allora le aperture restano `?`.
 
-Senza sensore configurato il conteggio aperture resta `?`; senza centrale d'allarme il relativo stato resta `?`. Puoi configurare solo i dati che hai disponibili. I widget aggiuntivi non configurati mostrano **Dato HA ?**.
+Senza sensore configurato il conteggio aperture resta `?`; senza centrale d'allarme lo scudo resta grigio scuro; senza entità meteo la riga della previsione non compare. Puoi configurare solo i dati che hai disponibili. I widget aggiuntivi non configurati mostrano **Dato HA ?**.
 
 L'integrazione espone una **luce** (accensione e luminosità), una **selezione pagina**, i pulsanti **Pagina precedente** e **Pagina successiva**, e sensori per aperture, allarme, attività e memoria libera. Le automazioni HA possono usare direttamente queste entità. Per esempio, un'automazione che si attiva quando suona la sveglia può selezionare la pagina Meteo; dopo 30 secondi il proiettore torna all'ora.
 
@@ -119,22 +119,23 @@ Home Assistant invia lo stato iniziale, i cambiamenti delle entità selezionate 
 
 ### Ora, stati e luminosità
 
-La pagina **Ora** è iniziale e sempre disponibile. Mostra l'ora, un'icona porta/finestra con il numero delle aperture e lo stato dell'allarme:
+La pagina **Ora** è iniziale e sempre disponibile. In alto mostra l'icona della previsione di oggi con temperatura massima (arancione) e minima (azzurra); al centro l'ora; sotto l'ora le porte aperte e l'icona dell'allarme. Le icone sono le stesse Material Design Icons usate da Home Assistant.
 
 | Indicazione | Significato |
 | --- | --- |
-| Aperture `0`, `1`, ... | Valore del sensore numero porte/finestre aperte |
-| Aperture `?` | Nessun sensore configurato, sensore indisponibile o dati scaduti |
-| Allarme `OFF` | Centrale disinserita; indicatore grigio |
-| Allarme `CASA` | Inserito in casa (`armed_home`); indicatore giallo |
-| Allarme `FUORI` | Inserito fuori casa (`armed_away`); indicatore arancione |
-| Allarme `NOTTE` | Inserito notte (`armed_night`); indicatore blu |
-| Allarme `VACANZA` | Inserito vacanza (`armed_vacation`); indicatore arancione |
-| Allarme `PERS.` | Inserito personalizzato (`armed_custom_bypass`); indicatore arancione |
-| Allarme `INS...` | In fase di inserimento (`arming`); indicatore giallo |
-| Allarme `ATTESA` | Ritardo d'ingresso prima dello scatto (`pending`); indicatore rosso-arancio |
-| Allarme `SCATTATO` | Allarme scattato; indicatore rosso |
-| Allarme `?` | Stato assente o scaduto |
+| Icona meteo, `22°` `14°` | Condizione, massima e minima della previsione giornaliera di oggi; la riga manca se il meteo non è configurato o i dati sono scaduti |
+| Icona porta aperta con `1`, `2`, ... | Numero di porte/finestre aperte; con zero aperture l'icona non compare |
+| Icona porta grigia con `?` | Nessun sensore configurato, sensore indisponibile o dati scaduti |
+| `mdi:shield-off` | Centrale disinserita; grigio |
+| `mdi:shield-home` | Inserito in casa (`armed_home`); giallo |
+| `mdi:shield-lock` | Inserito fuori casa (`armed_away`); arancione |
+| `mdi:shield-moon` | Inserito notte (`armed_night`); blu |
+| `mdi:shield-airplane` | Inserito vacanza (`armed_vacation`); arancione |
+| `mdi:security` | Inserito personalizzato (`armed_custom_bypass`); arancione |
+| `mdi:shield` giallo | In fase di inserimento (`arming`) |
+| `mdi:shield-outline` | Ritardo d'ingresso prima dello scatto (`pending`); rosso-arancio |
+| `mdi:bell-ring` | Allarme scattato; rosso |
+| `mdi:shield` grigio scuro | Stato assente o scaduto |
 
 Testi troppo lunghi per il cerchio non vengono troncati: il display riduce automaticamente il carattere. Solo se non bastasse nemmeno il carattere più piccolo compaiono i puntini.
 
@@ -142,11 +143,11 @@ Il terzo widget della pagina Ora è inizialmente la data. Un orario `--:--` indi
 
 Nella web UI la sezione **Proiezione** consente di accendere o spegnere la luce, scegliere la luminosità 1–100%, selezionare una pagina o scorrere. In Home Assistant usa la luce e la selezione pagina equivalenti. **Off** spegne la proiezione impostando il PWM a zero, ma la rete, il display e le API restano attivi; **On** ripristina l'ultimo livello. Stato e livello sopravvivono al riavvio.
 
-### Centrare l'area circolare
+### Centrare e orientare l'area circolare
 
-Nella web UI apri **Centraggio e bordi** e premi **Avvia regolazione**. Il display mostra una croce e la circonferenza che delimita l'area usata da tutte le pagine. Usa le frecce per spostare il centro di un pixel alla volta; **Riduci** e **Aumenta** cambiano il diametro di due pixel. Il cerchio resta interamente nei 128×128 pixel del display: se una direzione non è disponibile, riduci prima il diametro. Alla fine premi **Salva regolazione**; **Annulla** ripristina la geometria precedente. Solo il salvataggio scrive nella memoria persistente.
+Nella web UI apri **Centraggio e orientamento** e premi **Avvia regolazione**. Il display mostra una croce, la circonferenza che delimita l'area usata da tutte le pagine e la scritta **SU**. Usa le frecce per spostare il centro di un pixel alla volta; **Riduci** e **Aumenta** cambiano il diametro di due pixel. Il cerchio resta interamente nei 128×128 pixel del display: se una direzione non è disponibile, riduci prima il diametro. **Ruota 90°** gira il contenuto di un quarto di giro alla volta; **Specchia** lo ribalta, utile quando la lente o uno specchio invertono l'immagine. Regola finché la scritta **SU** è leggibile e rivolta verso l'alto. Rotazione e specchiatura non spostano il cerchio, quindi il centraggio resta valido. Alla fine premi **Salva regolazione**; **Annulla** ripristina geometria e orientamento precedenti. Solo il salvataggio scrive nella memoria persistente.
 
-Il diametro iniziale è 112 pixel, centrato su (64, 64); puoi impostarlo tra 80 e 128 pixel. Fuori dal cerchio i pixel restano neri. Le pagine, inclusa la schermata di configurazione Wi-Fi, seguono il centro e il diametro salvati. Durante la regolazione il LED si accende almeno al 30% anche se la proiezione era spenta; alla chiusura torna allo stato precedente. Questa funzione è disponibile dalla web UI locale e non crea entità o comandi Home Assistant.
+Il diametro iniziale è 112 pixel, centrato su (64, 64); puoi impostarlo tra 80 e 128 pixel. Fuori dal cerchio i pixel restano neri. Le pagine, inclusa la schermata di configurazione Wi-Fi, seguono centro, diametro e orientamento salvati. Durante la regolazione il LED si accende almeno al 30% anche se la proiezione era spenta; alla chiusura torna allo stato precedente. Questa funzione è disponibile dalla web UI locale e non crea entità o comandi Home Assistant.
 
 ### Modificare le pagine
 

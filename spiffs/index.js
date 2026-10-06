@@ -21,6 +21,7 @@ function renderCalibration() {
   if (!calibration) return;
   $("calibration-summary").textContent =
     `Centro: ${calibration.center_x}, ${calibration.center_y} · Diametro: ${calibration.diameter} px` +
+    ` · Rotazione: ${calibration.rotation}°` + (calibration.mirror ? " · Specchiata" : "") +
     (calibration.active ? " · Anteprima in corso" : " · Salvata");
   $("calibration-start").disabled = calibration.active || calibrationPending;
   $("calibration-save").disabled = !calibration.active || calibrationPending;
@@ -33,9 +34,17 @@ function renderCalibration() {
     "calibration-smaller": { diameter: calibration.diameter - 2 },
     "calibration-larger": { diameter: calibration.diameter + 2 }
   };
+  for (const id of ["calibration-rotate", "calibration-mirror"])
+    $(id).disabled = !calibration.active || calibrationPending;
+  $("calibration-mirror").setAttribute("aria-pressed", String(calibration.mirror));
   for (const [id, change] of Object.entries(moves))
     $(id).disabled = !calibration.active || calibrationPending ||
       !calibrationValid({ ...calibration, ...change });
+}
+
+function calibrationBody(value) {
+  return { center_x: value.center_x, center_y: value.center_y, diameter: value.diameter,
+           rotation: value.rotation, mirror: value.mirror };
 }
 
 async function changeCalibration(body) {
@@ -207,9 +216,13 @@ for (const [id, change] of [
 ]) $(id).addEventListener("click", () => run(async () => {
   const next = { ...calibration };
   for (const [key, delta] of Object.entries(change)) next[key] += delta;
-  if (calibrationValid(next)) await changeCalibration({
-    center_x: next.center_x, center_y: next.center_y, diameter: next.diameter
-  });
+  if (calibrationValid(next)) await changeCalibration(calibrationBody(next));
+}));
+for (const [id, change] of [
+  ["calibration-rotate", value => ({ rotation: (value.rotation + 90) % 360 })],
+  ["calibration-mirror", value => ({ mirror: !value.mirror })]
+]) $(id).addEventListener("click", () => run(async () => {
+  await changeCalibration(calibrationBody({ ...calibration, ...change(calibration) }));
 }));
 $("current-page").addEventListener("change", () => run(async () => {
   await request("/api/v1/display", "POST", { page: $("current-page").value });

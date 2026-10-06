@@ -29,7 +29,7 @@ Non pubblicare il token in script condivisi o log. Il firmware compilato contien
 | GET | `/api/v1/pages` | Nessuno | Configurazione di tutte le pagine |
 | PUT | `/api/v1/pages` | JSON pagine | Configurazione salvata |
 | POST | `/api/v1/display` | JSON comando | Stato aggiornato |
-| GET | `/api/v1/calibration` | Nessuno | Centro, diametro e modalità di regolazione |
+| GET | `/api/v1/calibration` | Nessuno | Centro, diametro, orientamento e modalità di regolazione |
 | POST | `/api/v1/calibration` | JSON regolazione | Stato della regolazione aggiornato |
 | POST | `/api/v1/ha/state` | JSON snapshot completo | `{}` |
 | GET | `/api/v1/config` | Nessuno | `{"timezone":"..."}` |
@@ -88,11 +88,11 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
 
 `brightness` è un intero da 1 a 100 e resta salvato anche quando `power` è `false`. `move` ammette `next` e `previous` e scorre in circolo. Una pagina secondaria torna automaticamente a `clock` dopo 30 secondi.
 
-## Centraggio circolare locale
+## Centraggio e orientamento locali
 
-`GET /api/v1/calibration` restituisce `{"center_x":64,"center_y":64,"diameter":112,"active":false}` per la geometria iniziale. La web UI usa questo endpoint; l'integrazione Home Assistant non lo usa.
+`GET /api/v1/calibration` restituisce `{"center_x":64,"center_y":64,"diameter":112,"rotation":0,"mirror":false,"active":false}` per la geometria iniziale. La web UI usa questo endpoint; l'integrazione Home Assistant non lo usa.
 
-`POST /api/v1/calibration` accetta una delle azioni `{"mode":"start"}`, `{"mode":"save"}` o `{"mode":"cancel"}`. Dopo `start`, un corpo `{"center_x":64,"center_y":64,"diameter":110}` aggiorna l'anteprima, con croce e bordo sul display. `save` salva in NVS e ripristina le normali pagine; `cancel` ripristina i valori salvati senza scrivere. Le modifiche non salvate si perdono al riavvio. Il diametro deve essere pari e compreso tra 80 e 128 pixel; il cerchio deve restare interamente sul display 128×128.
+`POST /api/v1/calibration` accetta una delle azioni `{"mode":"start"}`, `{"mode":"save"}` o `{"mode":"cancel"}`. Dopo `start`, un corpo `{"center_x":64,"center_y":64,"diameter":110,"rotation":90,"mirror":true}` aggiorna l'anteprima, con croce, bordo e scritta `SU` sul display. `rotation` (0, 90, 180 o 270 gradi) e `mirror` (booleano, specchiatura orizzontale applicata prima della rotazione) sono facoltativi: se mancano restano invariati. Centro e diametro si riferiscono sempre all'orientamento iniziale, quindi rotazione e specchiatura non spostano il cerchio sul display. `save` salva in NVS e ripristina le normali pagine; `cancel` ripristina i valori salvati senza scrivere. Le modifiche non salvate si perdono al riavvio. Il diametro deve essere pari e compreso tra 80 e 128 pixel; il cerchio deve restare interamente sul display 128×128.
 
 ## Pagine
 
@@ -134,6 +134,9 @@ Il componente incluso invia uno snapshot completo all'avvio, ai cambiamenti dell
   "alarm": "armed_home",
   "weather": "sunny",
   "temperature": "19°C",
+  "condition": "partlycloudy",
+  "temp_high": 22,
+  "temp_low": 14,
   "extras": ["Camera: 21°C", "", "", ""]
 }
 ```
@@ -143,7 +146,7 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
   --data-binary @snapshot.json "$PROJECTOR_URL/api/v1/ha/state"
 ```
 
-`openings` è un intero da 0 a 99. Se il sensore del conteggio non ha un valore numerico valido, usa `openings_known:false`; il display mostra `?` anche se il numero inviato è zero. `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`. `weather` è lungo al massimo 31 byte UTF-8, `temperature` 15 byte, ogni valore di `extras` 31 byte; sono accettati fino a quattro valori. Il dispositivo misura 120 secondi dall'ultimo snapshot ricevuto, senza affidarsi all'orologio di HA.
+`openings` è un intero da 0 a 99. Se il sensore del conteggio non ha un valore numerico valido, usa `openings_known:false`; il display mostra `?` anche se il numero inviato è zero. `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`. `weather` è lungo al massimo 31 byte UTF-8, `temperature` 15 byte, ogni valore di `extras` 31 byte; sono accettati fino a quattro valori. `condition`, `temp_high` e `temp_low` sono facoltativi e descrivono la previsione di oggi per la pagina Ora: `condition` è una condizione meteo di HA (`sunny`, `partlycloudy`, `rainy`, ...; massimo 15 byte, stringa vuota se sconosciuta), le temperature sono interi da -99 a 199 oppure `null`. Il dispositivo misura 120 secondi dall'ultimo snapshot ricevuto, senza affidarsi all'orologio di HA.
 
 ## Rete, configurazione e OTA
 

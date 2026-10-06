@@ -24,10 +24,10 @@ HACS installa e aggiorna solo l'integrazione Home Assistant. Il firmware ESP32 e
 ## Cosa puoi fare
 
 - Usare tre pagine iniziali (**Ora**, **Casa**, **Meteo**) e configurarne fino a cinque, con tre widget per pagina. La pagina Ora resta sempre la prima.
-- Vedere il numero di porte e finestre aperte e distinguere le modalità dell'allarme (disinserito, in casa, fuori casa, notte, vacanza, personalizzato, inserimento, attesa, scattato).
+- Vedere sulla pagina Ora la previsione di oggi (icona, massima e minima), le porte e finestre aperte (solo se ce ne sono) e la modalità dell'allarme con le stesse icone di Home Assistant (disinserito, in casa, fuori casa, notte, vacanza, personalizzato, inserimento, attesa, scattato).
 - Scorrere o scegliere una pagina da Home Assistant o dalla web UI. Dopo 30 secondi su una pagina secondaria ricompare l'ora.
 - Regolare la luminosità da 1 a 100%. **Off** spegne il LED di proiezione, mentre ESP32, Wi-Fi e display continuano a funzionare. Livello e stato acceso/spento sono persistenti.
-- Centrare il cerchio proiettato e regolarne il diametro dalla web UI locale. Durante la regolazione appaiono una croce e il bordo; la geometria salvata si applica a tutte le pagine e non è esposta a Home Assistant.
+- Centrare il cerchio proiettato, regolarne il diametro e ruotare (a passi di 90°) o specchiare il contenuto dalla web UI locale. Durante la regolazione appaiono una croce, il bordo e la scritta «SU»; geometria e orientamento salvati si applicano a tutte le pagine e non sono esposti a Home Assistant.
 - Ricevere dati da Home Assistant all'avvio, ai cambiamenti e ogni 60 secondi. Dopo 120 secondi senza aggiornamenti, i dati diventano sconosciuti; l'ora continua a funzionare.
 
 ## Documentazione

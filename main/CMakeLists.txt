@@ -17,7 +17,7 @@ if(NOT BED_CONFIG_RESULT EQUAL 0)
 endif()
 
 idf_component_register(
-    SRCS "main.c" "projector.c" "projector_logic.c" "bed_display.c" "bed_net.c" "bed_api.c"
+    SRCS "main.c" "projector.c" "projector_logic.c" "bed_display.c" "bed_icons.c" "bed_net.c" "bed_api.c"
     INCLUDE_DIRS "." "${BED_CONFIG_DIR}"
     REQUIRES app_update bootloader_support driver esp_event esp_http_server esp_lcd esp_netif
              esp_timer esp_wifi json lvgl esp_lvgl_port mdns nvs_flash spiffs
