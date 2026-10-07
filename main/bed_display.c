@@ -40,6 +40,9 @@ static lv_obj_t *door_icon;
 static lv_obj_t *door_count;
 static lv_obj_t *alarm_icon;
 static bool provisioning;
+/* Rounded borders need LV_DRAW_SW_COMPLEX, so the calibration ring is drawn pixel by pixel. */
+static uint8_t ring_buffer[LV_CANVAS_BUF_SIZE(128, 128, 16, LV_DRAW_BUF_STRIDE_ALIGN)];
+static int ring_diameter;
 static char ap_ssid[33];
 static char ap_password[17];
 
@@ -165,6 +168,25 @@ static void show(lv_obj_t *obj, bool visible)
     else if (!visible && !hidden) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* 2-pixel ring touching the edge of a diameter x diameter box, using doubled
+ * coordinates so the centre falls between pixels for even diameters. */
+static void draw_calibration_ring(int diameter)
+{
+    if (diameter == ring_diameter) return;
+    ring_diameter = diameter;
+    lv_canvas_set_buffer(calibration_ring, lv_draw_buf_align(ring_buffer, LV_COLOR_FORMAT_RGB565),
+                         diameter, diameter, LV_COLOR_FORMAT_RGB565);
+    lv_canvas_fill_bg(calibration_ring, lv_color_black(), LV_OPA_COVER);
+    int outer = diameter * diameter, inner = (diameter - 4) * (diameter - 4);
+    for (int y = 0; y < diameter; ++y)
+        for (int x = 0; x < diameter; ++x) {
+            int dx = 2 * x + 1 - diameter, dy = 2 * y + 1 - diameter;
+            int distance = dx * dx + dy * dy;
+            if (distance <= outer && distance >= inner)
+                lv_canvas_set_px(calibration_ring, x, y, lv_color_white(), LV_OPA_COVER);
+        }
+}
+
 static void set_pwm(uint8_t brightness)
 {
     uint32_t duty = ((uint32_t)brightness * LED_MAX_DUTY + 50) / 100;
@@ -245,16 +267,21 @@ static void layout_row(const row_item_t *items, int count, int diameter, int y, 
     }
 }
 
-/* Clock page top row: today's forecast icon with maximum and minimum temperature. */
-static void render_weather_row(const projector_snapshot_t *s, int diameter)
+static const char *weather_icon_of(const projector_snapshot_t *s, uint32_t *color)
 {
-    const char *icon = NULL;
-    uint32_t color = 0;
     for (int i = 0; s->ha_fresh && i < ARRAY_COUNT(weather_icons); ++i)
         if (!strcmp(s->condition, weather_icons[i].condition)) {
-            icon = weather_icons[i].icon;
-            color = weather_icons[i].color;
+            *color = weather_icons[i].color;
+            return weather_icons[i].icon;
         }
+    return NULL;
+}
+
+/* Clock page top row: today's forecast icon with maximum and minimum temperature. */
+static void render_weather_row(const projector_snapshot_t *s, int diameter, int y, int slot)
+{
+    uint32_t color = 0;
+    const char *icon = weather_icon_of(s, &color);
     show(weather_icon, false); show(temp_high, false); show(temp_low, false);
     if (!icon) return;
     char high[12], low[12];
@@ -264,11 +291,24 @@ static void render_weather_row(const projector_snapshot_t *s, int diameter)
     int count = 1;
     if (s->temp_high_known) items[count++] = (row_item_t){temp_high, high, false, 0xffb070, 3};
     if (s->temp_low_known) items[count++] = (row_item_t){temp_low, low, false, 0x80b0ff, 4};
-    layout_row(items, count, diameter, scaled(diameter, 11), scaled(diameter, 20));
+    layout_row(items, count, diameter, y, slot);
 }
 
-/* Clock page row under the time: open doors (only when any is open) and the alarm icon. */
-static void render_status_row(const projector_snapshot_t *s, int diameter)
+/* An unusable count must never look like "all closed", so it shows as a grey "?". */
+static bool doors_visible(const projector_snapshot_t *s)
+{
+    return !(s->ha_fresh && s->openings_known) || s->openings;
+}
+
+/* A disarmed alarm is the normal state, so its icon is left out. */
+static bool alarm_visible(const projector_snapshot_t *s)
+{
+    return strcmp(alarm_mode(s)->state, "disarmed");
+}
+
+/* Clock page row under the time: open doors (only when any is open) and the alarm
+ * icon (only when not disarmed). */
+static void render_status_row(const projector_snapshot_t *s, int diameter, int y, int slot)
 {
     bool known = s->ha_fresh && s->openings_known;
     char count[4] = "?";
@@ -276,15 +316,17 @@ static void render_status_row(const projector_snapshot_t *s, int diameter)
     const alarm_mode_t *alarm = alarm_mode(s);
     row_item_t items[3];
     int n = 0;
-    show(door_icon, false); show(door_count, false);
-    /* An unusable count must never look like "all closed", so it shows as a grey "?". */
-    if (!known || s->openings) {
+    show(door_icon, false); show(door_count, false); show(alarm_icon, false);
+    if (doors_visible(s)) {
         uint32_t color = known ? 0xffa000 : 0x607080;
         items[n++] = (row_item_t){door_icon, BED_ICON_DOOR_OPEN, true, color, 0};
         items[n++] = (row_item_t){door_count, count, false, color, 2};
     }
-    items[n++] = (row_item_t){alarm_icon, alarm->icon, true, alarm->color, 10};
-    layout_row(items, n, diameter, scaled(diameter, 70), diameter >= 112 ? 18 : 14);
+    if (alarm_visible(s)) {
+        int gap = n ? 10 : 0;
+        items[n++] = (row_item_t){alarm_icon, alarm->icon, true, alarm->color, gap};
+    }
+    if (n) layout_row(items, n, diameter, y, slot);
 }
 
 static void render(const projector_snapshot_t *s)
@@ -308,7 +350,7 @@ static void render(const projector_snapshot_t *s)
     show(calibration_top, calibrating);
     if (calibrating) {
         lv_obj_set_pos(calibration_ring, left, top);
-        lv_obj_set_size(calibration_ring, diameter, diameter);
+        draw_calibration_ring(diameter);
         lv_obj_set_pos(calibration_horizontal, left + 4, center_y - 1);
         lv_obj_set_size(calibration_horizontal, diameter - 8, 2);
         lv_obj_set_pos(calibration_vertical, center_x - 1, top + 4);
@@ -340,7 +382,32 @@ static void render(const projector_snapshot_t *s)
     bool weather_layout = !strcmp(page->layout, "weather");
     show(main_label, clock);
     show(header, !clock);
+    const char *widgets[3];
+    int count = 0;
+    for (int i = 0; i < PROJECTOR_MAX_WIDGETS && count < 3; ++i) {
+        const char *widget = page->widgets[i];
+        if (!widget[0] || (clock && (!strcmp(widget, "openings") || !strcmp(widget, "alarm")))) continue;
+        widgets[count++] = widget;
+    }
+    int line_y[3];
     if (clock) {
+        /* Stack the rows top to bottom and centre the stack vertically, so the page
+         * stays balanced whether or not the weather and status rows are shown. */
+        uint32_t unused;
+        bool weather = weather_icon_of(s, &unused) != NULL;
+        bool status = doors_visible(s) || alarm_visible(s);
+        int weather_slot = scaled(diameter, 20);
+        int time_slot = diameter >= 120 ? 42 : diameter >= 104 ? 32 : 18;
+        int status_slot = diameter >= 112 ? 18 : 14;
+        /* The time font has empty space under the digits, so the next row may overlap it. */
+        int time_trim = time_slot / 8;
+        int below = status + count;
+        int total = (weather ? weather_slot + 2 : 0) + time_slot + (status ? status_slot : 0) +
+                    count * 16 + (below ? 2 * (below - 1) - time_trim : 0);
+        int y = (diameter - total) / 2;
+        if (y < 0) y = 0;
+        render_weather_row(s, diameter, y, weather_slot);
+        if (weather) y += weather_slot + 2;
         time_t now = time(NULL);
         char time_text[8] = "--:--";
         if (now > 1577836800) {
@@ -348,30 +415,28 @@ static void render(const projector_snapshot_t *s)
             localtime_r(&now, &local);
             snprintf(time_text, sizeof(time_text), "%02d:%02d", local.tm_hour, local.tm_min);
         }
-        fit_circle_label(main_label, time_text, diameter, scaled(diameter, 33),
-                         diameter >= 120 ? 42 : diameter >= 104 ? 32 : 18,
+        fit_circle_label(main_label, time_text, diameter, y, time_slot,
                          time_fonts, ARRAY_COUNT(time_fonts));
-        render_weather_row(s, diameter);
-        render_status_row(s, diameter);
+        y += time_slot - time_trim;
+        render_status_row(s, diameter, y, status_slot);
+        if (status) y += status_slot + 2;
+        for (int row = 0; row < count; ++row, y += 18) line_y[row] = y;
     } else {
         fit_circle_label(header, page->name, diameter, scaled(diameter, 18), 16,
                          text_fonts, ARRAY_COUNT(text_fonts));
         hide_clock_rows();
+        for (int row = 0; row < count; ++row)
+            line_y[row] = scaled(diameter, weather_layout ? 34 + row * 27 : 35 + row * 27);
     }
     int row = 0;
-    for (int i = 0; i < PROJECTOR_MAX_WIDGETS; ++i) {
-        const char *widget = page->widgets[i];
-        if (!widget[0] || (clock && (!strcmp(widget, "openings") || !strcmp(widget, "alarm")))) continue;
-        if (row >= 3) break;
+    for (; row < count; ++row) {
         char value[64];
-        text_widget(widget, s, page, value, sizeof(value));
+        text_widget(widgets[row], s, page, value, sizeof(value));
         lv_obj_set_style_text_align(lines[row], clock ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
         int first_font = diameter >= 112 && weather_layout && row == 0 ? 0 : 1;
-        fit_circle_label(lines[row], value, diameter, scaled(diameter,
-            clock ? 90 : weather_layout ? 34 + row * 27 : 35 + row * 27), 16,
+        fit_circle_label(lines[row], value, diameter, line_y[row], 16,
             text_fonts + first_font, ARRAY_COUNT(text_fonts) - first_font);
         show(lines[row], true);
-        ++row;
     }
     for (; row < 3; ++row) show(lines[row], false);
 }
@@ -484,13 +549,7 @@ esp_err_t bed_display_init(void)
         lv_obj_set_style_text_font(lines[i], &lv_font_montserrat_12, 0);
         lv_obj_set_pos(lines[i], 5, 30 + i * 28);
     }
-    calibration_ring = lv_obj_create(screen);
-    lv_obj_remove_style_all(calibration_ring);
-    lv_obj_set_style_radius(calibration_ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(calibration_ring, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_color(calibration_ring, lv_color_white(), 0);
-    lv_obj_set_style_border_width(calibration_ring, 2, 0);
-    lv_obj_remove_flag(calibration_ring, LV_OBJ_FLAG_SCROLLABLE);
+    calibration_ring = lv_canvas_create(screen);
     calibration_horizontal = lv_obj_create(screen);
     lv_obj_remove_style_all(calibration_horizontal);
     lv_obj_set_style_bg_color(calibration_horizontal, lv_color_white(), 0);
