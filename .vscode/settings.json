@@ -39,6 +39,6 @@
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
   },
-  "idf.port": "/dev/tty.usbmodem21401",
-  "idf.monitorPort": "/dev/tty.usbmodem21401"
+  "idf.port": "/dev/tty.usbmodem21301",
+  "idf.monitorPort": "/dev/tty.usbmodem21301"
 }

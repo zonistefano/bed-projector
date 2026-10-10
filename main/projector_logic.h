@@ -12,3 +12,6 @@ void projector_orientation_panel(unsigned rotation, bool mirror,
                                  bool *swap_xy, bool *mirror_x, bool *mirror_y);
 void projector_orientation_center(unsigned rotation, bool mirror, int center_x, int center_y,
                                   int diameter, int *x, int *y);
+void projector_date_after(int year, int month, int day, int days_after, char out[11]);
+bool projector_shows_tomorrow(int hour);
+bool projector_page_timeout_valid(int seconds);

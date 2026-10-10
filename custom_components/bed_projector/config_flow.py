@@ -9,7 +9,9 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_ALARM, CONF_EXTRAS, CONF_OPENINGS, CONF_TOKEN, CONF_WEATHER, DOMAIN
+from .const import (CONF_ALARM, CONF_EXTRAS, CONF_INDOOR, CONF_LIGHT_LIST,
+                    CONF_OPENING_LIST, CONF_OPENINGS, CONF_OUTDOOR, CONF_SUMMARY_TODAY,
+                    CONF_SUMMARY_TOMORROW, CONF_TOKEN, CONF_WEATHER, DOMAIN)
 
 
 class BedProjectorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -57,12 +59,19 @@ class BedProjectorOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
         current = self.config_entry.options
         schema_fields = {}
-        for key, domain in ((CONF_OPENINGS, "sensor"), (CONF_ALARM, "alarm_control_panel"),
-                            (CONF_WEATHER, "weather")):
+        fields = (
+            (CONF_OPENINGS, "sensor", False), (CONF_OPENING_LIST, "binary_sensor", True),
+            (CONF_LIGHT_LIST, "light", True),
+            (CONF_ALARM, "alarm_control_panel", False), (CONF_WEATHER, "weather", False),
+            (CONF_INDOOR, "sensor", False), (CONF_OUTDOOR, "sensor", False),
+            (CONF_SUMMARY_TODAY, "sensor", False), (CONF_SUMMARY_TOMORROW, "sensor", False),
+        )
+        for key, domain, multiple in fields:
             # Older versions stored openings as a list of binary_sensors: drop that default.
-            default = current.get(key) if isinstance(current.get(key), str) else None
+            default = current.get(key) if isinstance(current.get(key), list if multiple else str) else None
             marker = vol.Optional(key, default=default) if default else vol.Optional(key)
-            schema_fields[marker] = selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
+            schema_fields[marker] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=domain, multiple=multiple))
         for key in CONF_EXTRAS:
             marker = vol.Optional(key, default=current[key]) if current.get(key) else vol.Optional(key)
             schema_fields[marker] = selector.EntitySelector(selector.EntitySelectorConfig())

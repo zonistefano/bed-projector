@@ -100,25 +100,27 @@ function renderPages() {
       const layoutWrap = document.createElement("label");
       layoutWrap.textContent = "Modello";
       const layout = document.createElement("select");
-      ["home", "weather"].forEach(value => layout.append(option(value, value)));
+      [["home", "Casa (allarme, temperature, aperture, luci)"], ["weather", "Meteo (adesso, giorno e sera)"],
+       ["list", "Elenco widget"]].forEach(([value, label]) => layout.append(option(value, label)));
       layout.value = page.layout;
-      layout.addEventListener("change", () => { page.layout = layout.value; });
+      layout.addEventListener("change", () => { page.layout = layout.value; renderPages(); });
       layoutWrap.append(layout);
       grid.append(layoutWrap);
     }
-    for (let slot = 0; slot < 3; slot++) {
+    // Ora, Casa e Meteo hanno un design fisso: i widget servono solo al modello Elenco.
+    for (let slot = 0; page.layout === "list" && slot < 3; slot++) {
       const wrap = document.createElement("label");
       wrap.textContent = `Widget ${slot + 1}`;
       const select = document.createElement("select");
       select.append(option("", "Nessuno"));
       widgets.forEach(value => select.append(option(value, value)));
       select.value = page.widgets[slot] || "";
-      if (index === 0 && slot < 2) select.disabled = true;
       select.addEventListener("change", () => { page.widgets[slot] = select.value; });
       wrap.append(select);
       grid.append(wrap);
     }
-    grid.append(field("Testo (widget text)", page.text || "", 32, value => { page.text = value; }));
+    if (page.layout === "list")
+      grid.append(field("Testo (widget text)", page.text || "", 32, value => { page.text = value; }));
     card.append(grid);
     if (index > 0) {
       const actions = document.createElement("div");
@@ -151,9 +153,10 @@ async function refresh() {
   $("power").checked = status.power;
   $("brightness").value = status.brightness;
   $("brightness-value").textContent = `${status.brightness}%`;
+  $("page-timeout").value = status.page_timeout ?? 30;
   $("state-summary").textContent = `Pagina: ${status.page} · Wi-Fi: ${status.wifi_connected ? "connesso" : "non connesso"}`;
   $("ha-summary").textContent = status.ha_fresh ?
-    `Aperture: ${status.openings ?? "?"} · Allarme: ${alarmLabels[status.alarm] ?? status.alarm} · Meteo: ${status.weather || "?"}` :
+    `Aperture: ${status.openings ?? "?"} · Luci: ${status.lights ?? "?"} · Allarme: ${alarmLabels[status.alarm] ?? status.alarm} · Meteo: ${status.weather || "?"}` :
     "Dati Home Assistant sconosciuti o non aggiornati";
   $("ha-token").value = token;
   $("timezone").value = configuration.timezone;
@@ -198,6 +201,14 @@ $("power").addEventListener("change", () => run(async () => {
   await refresh();
 }));
 $("brightness").addEventListener("input", () => { $("brightness-value").textContent = `${$("brightness").value}%`; });
+$("page-timeout-save").addEventListener("click", () => run(async () => {
+  const seconds = Number($("page-timeout").value);
+  if (!Number.isInteger(seconds) || (seconds !== 0 && (seconds < 5 || seconds > 3600)))
+    throw new Error("Usa 0 (mai) oppure un valore da 5 a 3600 secondi");
+  await request("/api/v1/display", "POST", { page_timeout: seconds });
+  message(seconds ? `La pagina Ora torna dopo ${seconds} secondi` : "La pagina scelta resta visibile");
+  await refresh();
+}));
 $("brightness-save").addEventListener("click", () => run(async () => {
   await request("/api/v1/display", "POST", { brightness: Number($("brightness").value) });
   await refresh();
@@ -236,7 +247,7 @@ for (const [button, move] of [["previous-page", "previous"], ["next-page", "next
 $("add-page").addEventListener("click", () => {
   let n = 1;
   while (pages.some(page => page.id === `page${n}`)) n++;
-  pages.push({ id: `page${n}`, name: `Pagina ${n}`, layout: "home", widgets: ["entity1"], text: "" });
+  pages.push({ id: `page${n}`, name: `Pagina ${n}`, layout: "list", widgets: ["entity1"], text: "" });
   renderPages();
 });
 $("save-pages").addEventListener("click", () => run(async () => {

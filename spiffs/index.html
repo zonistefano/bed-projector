@@ -28,6 +28,9 @@
         <label for="current-page">Pagina</label>
         <select id="current-page"></select>
         <div class="actions"><button id="previous-page">Precedente</button><button id="next-page">Successiva</button></div>
+        <label for="page-timeout">Ritorno alla pagina Ora dopo (secondi, 0 = mai)</label>
+        <input id="page-timeout" type="number" min="0" max="3600" step="1" value="30">
+        <div class="actions"><button id="page-timeout-save">Applica</button></div>
       </section>
       <section class="card">
         <h2>Centraggio e orientamento</h2>
@@ -47,7 +50,7 @@
       </section>
       <section class="card">
         <h2>Pagine</h2>
-        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine e assegnare tre widget a ciascuna.</p>
+        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine: Casa e Meteo hanno un design fisso, il modello Elenco mostra fino a tre widget.</p>
         <div id="pages"></div>
         <div class="actions"><button id="add-page">Aggiungi pagina</button><button id="save-pages">Salva pagine</button></div>
       </section>

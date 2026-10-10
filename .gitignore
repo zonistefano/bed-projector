@@ -7,3 +7,6 @@ main/include/config.h
 .env
 __pycache__/
 *.pyc
+
+# Downloaded font sources for tools/generate_fonts.py
+tools/.cache/

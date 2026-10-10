@@ -18,7 +18,10 @@ from pathlib import Path
 
 MDI_VERSION = "7.4.47"
 MDI_URL = f"https://cdn.jsdelivr.net/npm/@mdi/svg@{MDI_VERSION}/svg/{{}}.svg"
-SIZES = (14, 18, 22)
+SIZES = (12, 14, 18, 22, 30)
+# Variants drawn as fallback glyphs inside text: shifted down to sit on the
+# capital letters of the Montserrat text font of the same size.
+INLINE = {12: -2, 14: -2}
 FIRST_CODEPOINT = 0xE000
 SAMPLES = 4  # per axis: 16 samples map exactly to the 4 bpp alpha range
 
@@ -51,6 +54,17 @@ ICONS = (
     ("WEATHER_WINDY", "weather-windy"),
     ("WEATHER_WINDY_VARIANT", "weather-windy-variant"),
     ("HELP_CIRCLE_OUTLINE", "help-circle-outline"),
+    ("LIGHTBULB_ON", "lightbulb-on"),
+    ("LIGHTBULB_OUTLINE", "lightbulb-outline"),
+    ("DOOR_CLOSED", "door-closed"),
+    ("BED", "bed"),
+    ("PINE_TREE", "pine-tree"),
+    ("SUNRISE", "weather-sunset-up"),
+    ("SUNSET", "weather-sunset-down"),
+    ("WATER_PERCENT", "water-percent"),
+    ("UMBRELLA", "umbrella-outline"),
+    ("WEATHER_NIGHT_PARTLY_CLOUDY", "weather-night-partly-cloudy"),
+    ("THERMOMETER", "thermometer"),
 )
 
 Point = tuple[float, float]
@@ -198,16 +212,22 @@ def flatten(d: str) -> list[list[Point]]:
 
 
 def rasterize(polygons: list[list[Point]], size: int) -> list[int]:
-    """Nonzero-winding coverage per pixel, 0..15, of the 24x24 viewBox scaled to size."""
+    """Coverage of the 24x24 viewBox scaled to a size x size glyph."""
     scale = size / 24
+    return coverage([[(x * scale, y * scale) for x, y in polygon] for polygon in polygons],
+                    size, size)
+
+
+def coverage(polygons: list[list[Point]], width: int, height: int) -> list[int]:
+    """Nonzero-winding coverage per pixel, 0..15, of pixel-unit polygons (y down)."""
     edges = []
     for polygon in polygons:
         for a, b in zip(polygon, polygon[1:] + polygon[:1]):
             if a[1] != b[1]:
-                edges.append((a[0] * scale, a[1] * scale, b[0] * scale, b[1] * scale))
-    grid = SAMPLES * size
-    coverage = [0] * (size * size)
-    for sy in range(grid):
+                edges.append((a[0], a[1], b[0], b[1]))
+    grid_w, grid_h = SAMPLES * width, SAMPLES * height
+    result = [0] * (width * height)
+    for sy in range(grid_h):
         y = (sy + 0.5) / SAMPLES
         crossings = []
         for x0, y0, x1, y1 in edges:
@@ -220,10 +240,10 @@ def rasterize(polygons: list[list[Point]], size: int) -> list[int]:
             if winding == 0 or following[0] is None:
                 continue
             first = max(0, math.ceil(x * SAMPLES - 0.5))
-            last = min(grid - 1, math.ceil(following[0] * SAMPLES - 0.5) - 1)
+            last = min(grid_w - 1, math.ceil(following[0] * SAMPLES - 0.5) - 1)
             for sx in range(first, last + 1):
-                coverage[(sy // SAMPLES) * size + sx // SAMPLES] += 1
-    return [min(15, value) for value in coverage]
+                result[(sy // SAMPLES) * width + sx // SAMPLES] += 1
+    return [min(15, value) for value in result]
 
 
 def pack(pixels: list[int]) -> list[int]:
@@ -232,24 +252,46 @@ def pack(pixels: list[int]) -> list[int]:
     return [(pixels[i] << 4) | pixels[i + 1] for i in range(0, len(pixels), 2)]
 
 
+def font_struct(name: str, size: int, glyphs: str) -> str:
+    return f"""
+static const lv_font_fmt_txt_dsc_t font_dsc_{name} = {{
+    .glyph_bitmap = glyph_bitmap_{size}, .glyph_dsc = {glyphs}, .cmaps = cmaps_{size},
+    .kern_dsc = NULL, .kern_scale = 0, .cmap_num = 1, .bpp = 4, .kern_classes = 0,
+    .bitmap_format = 0,
+}};
+
+const lv_font_t bed_icons_{name} = {{
+    .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,
+    .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,
+    .line_height = {size}, .base_line = 0, .subpx = LV_FONT_SUBPX_NONE,
+    .underline_position = 0, .underline_thickness = 0, .dsc = &font_dsc_{name},
+}};
+"""
+
+
 def font_source(size: int, glyphs: list[list[int]]) -> str:
-    bitmap, descriptors, offset = [], [], 0
+    bitmap, offsets, offset = [], [], 0
     for macro, pixels in zip((m for m, _ in ICONS), glyphs):
         data = pack(pixels)
         bitmap.append(f"    /* {macro} */")
         for i in range(0, len(data), 16):
             bitmap.append("    " + ", ".join(f"0x{b:02x}" for b in data[i:i + 16]) + ",")
-        descriptors.append(f"    {{.bitmap_index = {offset}, .adv_w = {size * 16}, .box_w = {size}, "
-                           f".box_h = {size}, .ofs_x = 0, .ofs_y = 0}},")
+        offsets.append(offset)
         offset += len(data)
-    return f"""
+
+    def descriptors(name: str, ofs_y: int) -> str:
+        rows = [f"    {{.bitmap_index = {o}, .adv_w = {size * 16}, .box_w = {size}, "
+                f".box_h = {size}, .ofs_x = 0, .ofs_y = {ofs_y}}}," for o in offsets]
+        return f"""
+static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc_{name}[] = {{
+    {{.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0}},
+{chr(10).join(rows)}
+}};
+"""
+
+    source = f"""
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap_{size}[] = {{
 {chr(10).join(bitmap)}
-}};
-
-static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc_{size}[] = {{
-    {{.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0}},
-{chr(10).join(descriptors)}
 }};
 
 static const lv_font_fmt_txt_cmap_t cmaps_{size}[] = {{
@@ -257,20 +299,12 @@ static const lv_font_fmt_txt_cmap_t cmaps_{size}[] = {{
      .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0,
      .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY}},
 }};
-
-static const lv_font_fmt_txt_dsc_t font_dsc_{size} = {{
-    .glyph_bitmap = glyph_bitmap_{size}, .glyph_dsc = glyph_dsc_{size}, .cmaps = cmaps_{size},
-    .kern_dsc = NULL, .kern_scale = 0, .cmap_num = 1, .bpp = 4, .kern_classes = 0,
-    .bitmap_format = 0,
-}};
-
-const lv_font_t bed_icons_{size} = {{
-    .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,
-    .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,
-    .line_height = {size}, .base_line = 0, .subpx = LV_FONT_SUBPX_NONE,
-    .underline_position = 0, .underline_thickness = 0, .dsc = &font_dsc_{size},
-}};
 """
+    source += descriptors(str(size), 0) + font_struct(str(size), size, f"glyph_dsc_{size}")
+    if size in INLINE:
+        name = f"inline_{size}"
+        source += descriptors(name, INLINE[size]) + font_struct(name, size, f"glyph_dsc_{name}")
+    return source
 
 
 def utf8_literal(codepoint: int) -> str:
@@ -282,7 +316,8 @@ def main() -> int:
     polygons = [flatten(fetch_path(name)) for _, name in ICONS]
     header = ["/* Generated by tools/generate_icons.py from Material Design Icons "
               f"{MDI_VERSION} (Apache 2.0). */", "#pragma once", "", '#include "lvgl.h"', ""]
-    header += [f"extern const lv_font_t bed_icons_{size};" for size in SIZES] + [""]
+    header += [f"extern const lv_font_t bed_icons_{size};" for size in SIZES]
+    header += [f"extern const lv_font_t bed_icons_inline_{size};" for size in INLINE] + [""]
     for i, (macro, name) in enumerate(ICONS):
         header.append(f'#define BED_ICON_{macro} "{utf8_literal(FIRST_CODEPOINT + i)}" /* mdi:{name} */')
     source = [header[0], '#include "bed_icons.h"']

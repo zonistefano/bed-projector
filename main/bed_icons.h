@@ -3,9 +3,13 @@
 
 #include "lvgl.h"
 
+extern const lv_font_t bed_icons_12;
 extern const lv_font_t bed_icons_14;
 extern const lv_font_t bed_icons_18;
 extern const lv_font_t bed_icons_22;
+extern const lv_font_t bed_icons_30;
+extern const lv_font_t bed_icons_inline_12;
+extern const lv_font_t bed_icons_inline_14;
 
 #define BED_ICON_DOOR_OPEN "\xEE\x80\x80" /* mdi:door-open */
 #define BED_ICON_SHIELD "\xEE\x80\x81" /* mdi:shield */
@@ -33,3 +37,14 @@ extern const lv_font_t bed_icons_22;
 #define BED_ICON_WEATHER_WINDY "\xEE\x80\x97" /* mdi:weather-windy */
 #define BED_ICON_WEATHER_WINDY_VARIANT "\xEE\x80\x98" /* mdi:weather-windy-variant */
 #define BED_ICON_HELP_CIRCLE_OUTLINE "\xEE\x80\x99" /* mdi:help-circle-outline */
+#define BED_ICON_LIGHTBULB_ON "\xEE\x80\x9A" /* mdi:lightbulb-on */
+#define BED_ICON_LIGHTBULB_OUTLINE "\xEE\x80\x9B" /* mdi:lightbulb-outline */
+#define BED_ICON_DOOR_CLOSED "\xEE\x80\x9C" /* mdi:door-closed */
+#define BED_ICON_BED "\xEE\x80\x9D" /* mdi:bed */
+#define BED_ICON_PINE_TREE "\xEE\x80\x9E" /* mdi:pine-tree */
+#define BED_ICON_SUNRISE "\xEE\x80\x9F" /* mdi:weather-sunset-up */
+#define BED_ICON_SUNSET "\xEE\x80\xA0" /* mdi:weather-sunset-down */
+#define BED_ICON_WATER_PERCENT "\xEE\x80\xA1" /* mdi:water-percent */
+#define BED_ICON_UMBRELLA "\xEE\x80\xA2" /* mdi:umbrella-outline */
+#define BED_ICON_WEATHER_NIGHT_PARTLY_CLOUDY "\xEE\x80\xA3" /* mdi:weather-night-partly-cloudy */
+#define BED_ICON_THERMOMETER "\xEE\x80\xA4" /* mdi:thermometer */

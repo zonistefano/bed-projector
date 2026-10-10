@@ -103,30 +103,48 @@ Per installare senza HACS, copia **l'intera cartella** `custom_components/bed_pr
 | Opzione | Cosa selezionare | Risultato |
 | --- | --- | --- |
 | Sensore numero porte/finestre aperte | Un `sensor` numerico, per esempio `sensor.number_open_contacts` | Il valore intero (0–99) è il numero di aperture. Se il sensore è indisponibile o non numerico, il conteggio è sconosciuto. |
+| Porte/finestre da elencare per nome | Facoltativo: i `binary_sensor` dei contatti | Nomi mostrati nella pagina Casa per quelli aperti. Se vuoto, l'integrazione usa tutti i `binary_sensor` di classe porta, finestra, porta garage o apertura. |
+| Luci da elencare | Facoltativo: entità `light` | Nomi delle luci accese nella pagina Casa e loro numero nella pagina Ora. Se vuoto, tutte le luci tranne i gruppi. La luce del proiettore è sempre esclusa. |
 | Centrale d'allarme | Un `alarm_control_panel` | Distingue disinserito, in casa, fuori casa, notte, vacanza, personalizzato, inserimento, attesa e scattato. |
-| Entità meteo | Una `weather` | Stato meteo e temperatura, se l'entità fornisce l'attributo `temperature`. Per la pagina Ora l'integrazione legge anche la previsione giornaliera (o, in mancanza, quella a 12 ore) con `weather.get_forecasts`. |
-| Dati aggiuntivi 1–4 | Fino a quattro entità HA | Nome, valore e unità vengono mostrati dai widget `entity1`–`entity4`. |
+| Entità meteo | Una `weather`, per esempio `weather.pirateweather` | Condizioni attuali, umidità, vento e temperatura percepita. L'integrazione legge con `weather.get_forecasts` le previsioni giornaliere, orarie e a 12 ore (aggiornate ogni 10 minuti). |
+| Temperatura camera da letto | Un `sensor` di temperatura | Pagina Casa, con un decimale. |
+| Temperatura esterna | Facoltativo: un `sensor` di temperatura | Pagina Casa; se vuoto usa la temperatura dell'entità meteo. |
+| Riepilogo meteo di oggi / di domani | Facoltativo: sensori di testo, per esempio `sensor.pirateweather_summary_0d` e `sensor.pirateweather_summary_1d` | Frase che scorre in fondo alla pagina Meteo. |
+| Dati aggiuntivi 1–4 | Fino a quattro entità HA | Nome, valore e unità vengono mostrati dai widget `entity1`–`entity4` del modello Elenco. |
+
+Alba e tramonto sono calcolati da Home Assistant per la posizione configurata in **Impostazioni → Sistema → Generale**: non servono sensori. La parte **giorno** della previsione riassume le ore 8–18, la **sera** le ore 18–24 della previsione oraria: condizione più frequente (a parità, la più severa), temperatura massima di giorno e media di sera, probabilità di pioggia massima. Se il servizio meteo non fornisce la previsione oraria, il giorno usa quella giornaliera e la sera quella notturna a 12 ore.
 
 Chi aggiorna da una versione precedente (lista di `binary_sensor`) deve riaprire **Configura** e scegliere il sensore numerico: fino ad allora le aperture restano `?`.
 
-Senza sensore configurato il conteggio aperture resta `?`; senza centrale d'allarme lo scudo resta grigio scuro; senza entità meteo la riga della previsione non compare. Puoi configurare solo i dati che hai disponibili. I widget aggiuntivi non configurati mostrano **Dato HA ?**.
+Senza sensore configurato il conteggio aperture resta `?`; senza centrale d'allarme lo scudo resta grigio scuro; senza entità meteo la riga della previsione non compare. Puoi configurare solo i dati che hai disponibili. I widget aggiuntivi non configurati mostrano **Dato HA ?**. Il numero di luci accese è contato dall'elenco, non da un sensore di conteggio: un aiutante come `sensor.number_lights_on` includerebbe anche la proiezione stessa ogni volta che è accesa. Accendere o spegnere una luce o aprire un contatto dell'elenco aggiorna subito il display.
 
-L'integrazione espone una **luce** (accensione e luminosità), una **selezione pagina**, i pulsanti **Pagina precedente** e **Pagina successiva**, e sensori per aperture, allarme, attività e memoria libera. Le automazioni HA possono usare direttamente queste entità. Per esempio, un'automazione che si attiva quando suona la sveglia può selezionare la pagina Meteo; dopo 30 secondi il proiettore torna all'ora.
+L'integrazione espone una **luce** (accensione e luminosità), una **selezione pagina**, i pulsanti **Pagina precedente** e **Pagina successiva**, il numero **Ritorno alla pagina Ora** (secondi, 0 = mai) e sensori per aperture, allarme, attività e memoria libera. Le automazioni HA possono usare direttamente queste entità. Per esempio, un'automazione che si attiva quando suona la sveglia può selezionare la pagina Meteo; trascorso il tempo di ritorno il proiettore torna all'ora.
 
 Home Assistant invia lo stato iniziale, i cambiamenti delle entità selezionate e un riepilogo ogni 60 secondi. Se non arrivano aggiornamenti per 120 secondi, il proiettore mostra `?` per i dati domotici ma continua a mostrare l'ora.
 
 ## 5. Uso quotidiano
 
-### Ora, stati e luminosità
+### Le pagine
 
-La pagina **Ora** è iniziale e sempre disponibile. In alto mostra l'icona della previsione di oggi con temperatura massima (arancione) e minima (azzurra); al centro l'ora; sotto l'ora le porte aperte e l'icona dell'allarme. Le icone sono le stesse Material Design Icons usate da Home Assistant.
+Le pagine usano Montserrat (testo in SemiBold, temperature in Bold, con le lettere accentate) e le stesse Material Design Icons di Home Assistant. Ogni elemento è centrato nel cerchio di proiezione: i testi più lunghi dello spazio disponibile scorrono lentamente, quelli brevi si rimpiccioliscono invece di scorrere.
+
+**Ora** (sempre la prima pagina), dall'alto:
+
+1. Icona della previsione, massima (arancione) e minima (azzurra) in grassetto. Fino alle 20:59 è la previsione di oggi, dalle 21:00 quella di domani. La riga manca se il meteo non è configurato o i dati sono scaduti.
+2. L'ora.
+3. Icone di stato, solo quando servono: porta aperta con il numero di aperture, lampadina con il numero di luci accese, scudo dell'allarme se non è disinserito.
+4. Riga che scorre con la data (es. `Sab 10 Ottobre`), l'ora dell'alba e quella del tramonto.
+
+**Casa**: modalità dell'allarme con icona e nome, temperatura della camera (icona letto) e quella esterna (icona albero), poi una riga con i nomi delle porte/finestre aperte (`Finestra Sala · Finestra Cucina`, oppure **Tutto chiuso**) e una con i nomi delle luci accese (oppure **Luci spente**). Se gli elenchi superano otto nomi compare `+N`.
+
+**Meteo**: icona e temperatura attuali, una riga che scorre con condizione, temperatura percepita, umidità e vento; sotto il titolo **OGGI** (o **DOMANI** dalle 21:00) le colonne **Giorno** e **Sera** con icona e temperatura; in fondo, a scorrimento, probabilità di pioggia (quando è almeno 10%) e il riepilogo della giornata.
 
 | Indicazione | Significato |
 | --- | --- |
-| Icona meteo, `22°` `14°` | Condizione, massima e minima della previsione giornaliera di oggi; la riga manca se il meteo non è configurato o i dati sono scaduti |
 | Icona porta aperta con `1`, `2`, ... | Numero di porte/finestre aperte; con zero aperture l'icona non compare |
 | Icona porta grigia con `?` | Nessun sensore configurato, sensore indisponibile o dati scaduti |
-| `mdi:shield-off` | Centrale disinserita; grigio |
+| Lampadina gialla con numero | Luci accese; con zero luci l'icona non compare |
+| `mdi:shield-off` | Centrale disinserita; nella pagina Ora non compare |
 | `mdi:shield-home` | Inserito in casa (`armed_home`); giallo |
 | `mdi:shield-lock` | Inserito fuori casa (`armed_away`); arancione |
 | `mdi:shield-moon` | Inserito notte (`armed_night`); blu |
@@ -137,9 +155,7 @@ La pagina **Ora** è iniziale e sempre disponibile. In alto mostra l'icona della
 | `mdi:bell-ring` | Allarme scattato; rosso |
 | `mdi:shield` grigio scuro | Stato assente o scaduto |
 
-Testi troppo lunghi per il cerchio non vengono troncati: il display riduce automaticamente il carattere. Solo se non bastasse nemmeno il carattere più piccolo compaiono i puntini.
-
-Il terzo widget della pagina Ora è inizialmente la data. Un orario `--:--` indica che la sincronizzazione NTP non è ancora riuscita.
+Un orario `--:--` e la scritta **In attesa dell'ora** indicano che la sincronizzazione NTP non è ancora riuscita.
 
 Nella web UI la sezione **Proiezione** consente di accendere o spegnere la luce, scegliere la luminosità 1–100%, selezionare una pagina o scorrere. In Home Assistant usa la luce e la selezione pagina equivalenti. **Off** spegne la proiezione impostando il PWM a zero, ma la rete, il display e le API restano attivi; **On** ripristina l'ultimo livello. Stato e livello sopravvivono al riavvio.
 
@@ -151,9 +167,9 @@ Il diametro iniziale è 112 pixel, centrato su (64, 64); puoi impostarlo tra 80 
 
 ### Modificare le pagine
 
-Apri **Pagine** nella web UI. Puoi rinominare le pagine, scegliere il modello delle pagine secondarie, cambiare i widget, spostare le pagine con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine.
+Apri **Pagine** nella web UI. Puoi rinominare le pagine, scegliere il modello delle pagine secondarie, spostarle con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine.
 
-La pagina Ora resta prima e conserva `openings` e `alarm` nei primi due slot. Il suo terzo slot è libero. Ogni altra pagina usa il modello **home** (tre righe) o **weather** (prima riga più evidente) e ha fino a tre widget:
+La pagina Ora resta prima. Le altre usano il modello **Casa**, **Meteo** (design fissi descritti sopra) o **Elenco**, che mostra il nome della pagina e fino a tre widget:
 
 | Widget | Contenuto |
 | --- | --- |
@@ -164,9 +180,9 @@ La pagina Ora resta prima e conserva `openings` e `alarm` nei primi due slot. Il
 | `entity1`–`entity4` | Dati aggiuntivi scelti nelle opzioni HA |
 | `text` | Testo statico inserito nel campo **Testo** della pagina |
 
-Le pagine preconfigurate sono **Ora** (`openings`, `alarm`, `date`), **Casa** (`openings`, `alarm`, `entity1`) e **Meteo** (`weather`, `date`, `entity2`). Se non usi un dato aggiuntivo, sostituisci quel widget. Il nome della pagina è lungo al massimo 16 byte e il testo statico 32 byte: con caratteri accentati il limite in caratteri può essere inferiore. I valori lunghi sono abbreviati sul display.
+Le pagine preconfigurate sono **Ora**, **Casa** e **Meteo**. Le configurazioni salvate da versioni precedenti restano valide: le pagine con modello `home` e `weather` mostrano i nuovi design e i loro widget vengono ignorati. Il nome della pagina è lungo al massimo 16 byte e il testo statico 32 byte: con caratteri accentati il limite in caratteri può essere inferiore.
 
-L'ordine delle pagine definisce **precedente/successiva**. Selezionando una pagina secondaria da web UI o HA, dopo 30 secondi torna automaticamente Ora. La scelta non viene salvata per il riavvio.
+L'ordine delle pagine definisce **precedente/successiva**. Selezionando una pagina secondaria da web UI o HA, la pagina Ora torna automaticamente dopo il tempo impostato in **Proiezione → Ritorno alla pagina Ora** (web UI) o con l'entità **Ritorno alla pagina Ora** (HA): da 5 a 3600 secondi, predefinito 30; con `0` la pagina scelta resta visibile. Il tempo resta salvato al riavvio, la pagina scelta no.
 
 ## 6. Aggiornamenti
 
@@ -188,8 +204,8 @@ Il browser salva il token nel proprio archivio locale. **Rimuovi token da questo
 | --- | --- |
 | `bed-projector.local` non si apre | Trova l'IP nel router e prova `http://IP`. Verifica che il client sia sulla stessa rete e che non sia isolato dal Wi-Fi. |
 | Il dispositivo mostra `--:--` | Controlla Wi-Fi, DNS e accesso NTP a `pool.ntp.org`; attendi la sincronizzazione. |
-| Aperture, allarme o meteo mostrano `?` | Configura le entità nelle opzioni HA, verifica che siano disponibili e che HA possa raggiungere l'IP del proiettore. Dopo 120 secondi senza snapshot i dati scadono. |
-| La pagina torna da sola a Ora | È il comportamento previsto dopo 30 secondi su una pagina secondaria. |
+| Aperture, luci, allarme o meteo mostrano `?` | Configura le entità nelle opzioni HA, verifica che siano disponibili e che HA possa raggiungere l'IP del proiettore. Dopo 120 secondi senza snapshot i dati scadono. |
+| La pagina torna da sola a Ora | È il comportamento previsto: regola o disattiva (`0`) il **Ritorno alla pagina Ora** dalla web UI o da HA. |
 | L'access point non compare | Con Wi-Fi valido nel `.env` il dispositivo si collega direttamente: è il comportamento previsto. Per forzare l'AP, rendi temporaneamente indisponibile quella rete e riavvia; attendi circa 20 secondi. |
 | `/api/v1/pair` restituisce `403` | Accedi da un client collegato all'AP `bed-projector` usando `http://192.168.4.1`; dalla LAN l'abbinamento è disabilitato. |
 | Dopo il cambio Wi-Fi il browser richiede di nuovo il token | È normale: l'indirizzo del sito è cambiato. Reinserisci `API_TOKEN` dal `.env`. |

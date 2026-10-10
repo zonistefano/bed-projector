@@ -53,8 +53,10 @@ Esempio di risposta:
   "brightness": 30,
   "page": "clock",
   "page_index": 0,
+  "page_timeout": 30,
   "ha_fresh": false,
   "openings": null,
+  "lights": null,
   "alarm": "unknown",
   "weather": "",
   "temperature": "",
@@ -64,11 +66,11 @@ Esempio di risposta:
 }
 ```
 
-`openings:null` significa conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
+`openings:null` e `lights:null` significano conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
 
 ## Comandi del display
 
-`POST /api/v1/display` accetta `power`, `brightness` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
+`POST /api/v1/display` accetta `power`, `brightness`, `page_timeout` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
 
 ```sh
 # Spegni solo il LED di proiezione.
@@ -86,7 +88,12 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
   -d '{"move":"next"}' "$PROJECTOR_URL/api/v1/display"
 ```
 
-`brightness` è un intero da 1 a 100 e resta salvato anche quando `power` è `false`. `move` ammette `next` e `previous` e scorre in circolo. Una pagina secondaria torna automaticamente a `clock` dopo 30 secondi.
+`brightness` è un intero da 1 a 100 e resta salvato anche quando `power` è `false`. `move` ammette `next` e `previous` e scorre in circolo. Una pagina secondaria torna automaticamente a `clock` dopo `page_timeout` secondi: `0` la lascia visibile, altrimenti il valore va da 5 a 3600 (predefinito 30). Il valore resta salvato al riavvio ed è riportato da `GET /api/v1/status`.
+
+```sh
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"page_timeout":60}' "$PROJECTOR_URL/api/v1/display"
+```
 
 ## Centraggio e orientamento locali
 
@@ -101,9 +108,9 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
 ```json
 {
   "pages": [
-    {"id":"clock","name":"Ora","layout":"clock","widgets":["openings","alarm","date"],"text":""},
-    {"id":"home","name":"Casa","layout":"home","widgets":["openings","alarm","entity1"],"text":""},
-    {"id":"weather","name":"Meteo","layout":"weather","widgets":["weather","date","entity2"],"text":""}
+    {"id":"clock","name":"Ora","layout":"clock","widgets":[],"text":""},
+    {"id":"home","name":"Casa","layout":"home","widgets":[],"text":""},
+    {"id":"weather","name":"Meteo","layout":"weather","widgets":[],"text":""}
   ]
 }
 ```
@@ -117,8 +124,8 @@ curl -X PUT -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: applic
 Regole di validazione:
 
 - Da 1 a 5 pagine con ID univoci alfanumerici o `_`, lunghi fino a 16 byte. L'ordine dell'array è l'ordine della navigazione.
-- La prima pagina deve avere `id:"clock"`, `layout:"clock"` e i widget `openings`, `alarm` nei primi due slot. Il terzo slot è configurabile.
-- Le altre pagine usano `layout:"home"` o `layout:"weather"`; massimo tre widget tra `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`.
+- La prima pagina deve avere `id:"clock"` e `layout:"clock"`; nessun'altra pagina può usarli.
+- Le altre pagine usano `layout:"home"`, `layout:"weather"` o `layout:"list"`. Ogni pagina accetta al massimo tre widget tra `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`, ma solo `list` li mostra: `clock`, `home` e `weather` hanno un design fisso e li ignorano (le configurazioni precedenti restano quindi valide).
 - `name` è lungo al massimo 16 byte, `text` al massimo 32 byte. Il widget `text` mostra il testo della propria pagina.
 
 Un JSON non valido viene rifiutato senza cambiare le pagine. Se il salvataggio NVS fallisce, il firmware ripristina in RAM la configurazione precedente e risponde con un errore.
@@ -129,15 +136,33 @@ Il componente incluso invia uno snapshot completo all'avvio, ai cambiamenti dell
 
 ```json
 {
-  "openings": 1,
+  "openings": 2,
   "openings_known": true,
-  "alarm": "armed_home",
-  "weather": "sunny",
-  "temperature": "19°C",
+  "alarm": "armed_night",
+  "weather": "partlycloudy",
+  "temperature": "17.3°C",
   "condition": "partlycloudy",
   "temp_high": 22,
   "temp_low": 14,
-  "extras": ["Camera: 21°C", "", "", ""]
+  "extras": ["Camera: 21°C", "", "", ""],
+  "lights": 1,
+  "lights_known": true,
+  "opening_names": ["Finestra Sala", "Finestra Cucina"],
+  "light_names": ["Luce Soggiorno"],
+  "indoor": "21.5°",
+  "outdoor": "17.3°",
+  "temp_now": 17,
+  "feels": "18°",
+  "humidity": 71,
+  "wind": "2 km/h",
+  "days": [
+    {"date": "2026-10-10", "condition": "partlycloudy", "high": 22, "low": 14, "precipitation": 50,
+     "sunrise": "07:33", "sunset": "18:47", "summary": "Nubi sparse fino a sera.",
+     "day": {"condition": "partlycloudy", "temperature": 22, "precipitation": 20},
+     "evening": {"condition": "clear-night", "temperature": 16, "precipitation": 0}},
+    {"date": "2026-10-11", "condition": "rainy", "high": 19, "low": 13, "precipitation": 70,
+     "sunrise": "07:35", "sunset": "18:45", "summary": "", "day": null, "evening": null}
+  ]
 }
 ```
 
@@ -146,7 +171,26 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
   --data-binary @snapshot.json "$PROJECTOR_URL/api/v1/ha/state"
 ```
 
-`openings` è un intero da 0 a 99. Se il sensore del conteggio non ha un valore numerico valido, usa `openings_known:false`; il display mostra `?` anche se il numero inviato è zero. `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`. `weather` è lungo al massimo 31 byte UTF-8, `temperature` 15 byte, ogni valore di `extras` 31 byte; sono accettati fino a quattro valori. `condition`, `temp_high` e `temp_low` sono facoltativi e descrivono la previsione di oggi per la pagina Ora: `condition` è una condizione meteo di HA (`sunny`, `partlycloudy`, `rainy`, ...; massimo 15 byte, stringa vuota se sconosciuta), le temperature sono interi da -99 a 199 oppure `null`. Il dispositivo misura 120 secondi dall'ultimo snapshot ricevuto, senza affidarsi all'orologio di HA.
+Campi obbligatori:
+
+- `openings` è un intero da 0 a 99. Se il sensore del conteggio non ha un valore numerico valido, usa `openings_known:false`; il display mostra `?` anche se il numero inviato è zero.
+- `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`.
+- `weather` (condizione attuale di HA, massimo 31 byte UTF-8), `temperature` (15 byte) ed `extras` (fino a quattro valori da 31 byte).
+
+Campi facoltativi: se mancano o sono `null` il dato è sconosciuto; se presenti devono essere validi, altrimenti l'intero snapshot è rifiutato. Un'integrazione precedente che non li invia continua a funzionare.
+
+| Campo | Formato |
+| --- | --- |
+| `condition`, `temp_high`, `temp_low` | Previsione di oggi per integrazioni che non inviano `days`: condizione HA (massimo 15 byte) e interi da -99 a 199 |
+| `lights`, `lights_known` | Luci accese da 0 a 99, esclusa la proiezione; `lights` è richiesto quando `lights_known` è `true` |
+| `opening_names`, `light_names` | Fino a 8 nomi non vuoti da 31 byte ciascuno |
+| `indoor`, `outdoor`, `feels` | Temperature già formattate, massimo 11 byte |
+| `temp_now` | Temperatura attuale intera, da -99 a 199 |
+| `humidity` | Intero da 0 a 100 |
+| `wind` | Vento già formattato, massimo 15 byte |
+| `days` | Fino a 2 giorni, oggi e domani |
+
+Ogni elemento di `days` contiene `date` (data locale di HA, `AAAA-MM-GG`), `condition`, `high`, `low`, `precipitation` (0–100), `sunrise` e `sunset` (`HH:MM` locali), `summary` (massimo 63 byte), `day` ed `evening`. Questi ultimi sono oggetti `{"condition", "temperature", "precipitation"}` oppure `null`. Il dispositivo sceglie il giorno confrontando `date` con il proprio orologio: fino alle 20:59 usa oggi, dalle 21:00 domani. Il dispositivo misura 120 secondi dall'ultimo snapshot ricevuto, senza affidarsi all'orologio di HA.
 
 ## Rete, configurazione e OTA
 

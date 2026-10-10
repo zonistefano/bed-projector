@@ -1,14 +1,16 @@
 #include "projector_logic.h"
+#include <stdio.h>
 
 bool projector_data_fresh(int64_t last_us, int64_t now_us, int64_t ttl_us)
 {
     return last_us > 0 && now_us >= last_us && now_us - last_us <= ttl_us;
 }
 
+/* A timeout of zero keeps the selected page. */
 bool projector_page_timed_out(unsigned page_index, int64_t selected_us,
                               int64_t now_us, int64_t timeout_us)
 {
-    return page_index != 0 && selected_us > 0 && now_us >= selected_us &&
+    return page_index != 0 && timeout_us > 0 && selected_us > 0 && now_us >= selected_us &&
            now_us - selected_us >= timeout_us;
 }
 
@@ -84,4 +86,34 @@ void projector_orientation_center(unsigned rotation, bool mirror, int center_x, 
     content_unmap(rotation, mirror, &x2, &y2);
     *x = (x1 < x2 ? x1 : x2) + radius;
     *y = (y1 < y2 ? y1 : y2) + radius;
+}
+
+static int days_in_month(int year, int month)
+{
+    static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    return month == 2 && leap ? 29 : days[month - 1];
+}
+
+/* YYYY-MM-DD of the local date days_after days later, as HA sends forecast dates. */
+void projector_date_after(int year, int month, int day, int days_after, char out[11])
+{
+    for (int i = 0; i < days_after; ++i)
+        if (++day > days_in_month(year, month)) {
+            day = 1;
+            if (++month > 12) { month = 1; ++year; }
+        }
+    snprintf(out, 11, "%04u-%02u-%02u", (unsigned)year % 10000u, (unsigned)month % 100u,
+             (unsigned)day % 100u);
+}
+
+/* From 21:00 the forecast that matters is the next day's. */
+bool projector_shows_tomorrow(int hour)
+{
+    return hour >= 21;
+}
+
+bool projector_page_timeout_valid(int seconds)
+{
+    return seconds == 0 || (seconds >= 5 && seconds <= 3600);
 }

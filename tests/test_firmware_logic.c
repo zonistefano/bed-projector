@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include "projector_logic.h"
 
 static void physical(bool swap, bool mirror_x, bool mirror_y, int *x, int *y)
@@ -39,6 +40,11 @@ int main(void)
     assert(!projector_page_timed_out(0, 100, 30100000, 30000000));
     assert(!projector_page_timed_out(1, 100, 30000099, 30000000));
     assert(projector_page_timed_out(1, 100, 30000100, 30000000));
+    assert(!projector_page_timed_out(1, 100, 999000000000, 0));
+    assert(projector_page_timeout_valid(0) && projector_page_timeout_valid(5) &&
+           projector_page_timeout_valid(3600));
+    assert(!projector_page_timeout_valid(4) && !projector_page_timeout_valid(3601) &&
+           !projector_page_timeout_valid(-1));
     assert(projector_data_fresh(100, 120000100, 120000000));
     assert(!projector_data_fresh(100, 120000101, 120000000));
     assert(!projector_data_fresh(0, 1, 120000000));
@@ -67,6 +73,16 @@ int main(void)
     assert(x == 53 && y == 53);
     projector_orientation_center(0, true, 53, 75, 106, &x, &y);
     assert(x == 75 && y == 75);
+    char date[11];
+    projector_date_after(2026, 10, 10, 1, date);
+    assert(!strcmp(date, "2026-10-11"));
+    projector_date_after(2026, 12, 31, 1, date);
+    assert(!strcmp(date, "2027-01-01"));
+    projector_date_after(2028, 2, 28, 1, date);
+    assert(!strcmp(date, "2028-02-29"));
+    projector_date_after(2026, 2, 28, 1, date);
+    assert(!strcmp(date, "2026-03-01"));
+    assert(!projector_shows_tomorrow(20) && projector_shows_tomorrow(21));
     for (unsigned rotation = 0; rotation < 4; ++rotation) {
         assert_circle_fixed(rotation, false);
         assert_circle_fixed(rotation, true);

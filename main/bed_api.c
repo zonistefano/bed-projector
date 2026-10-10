@@ -127,9 +127,12 @@ static esp_err_t status_response(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "brightness", snapshot.brightness);
     cJSON_AddStringToObject(root, "page", snapshot.pages[snapshot.page_index].id);
     cJSON_AddNumberToObject(root, "page_index", snapshot.page_index);
+    cJSON_AddNumberToObject(root, "page_timeout", snapshot.page_timeout);
     cJSON_AddBoolToObject(root, "ha_fresh", snapshot.ha_fresh);
     if (snapshot.ha_fresh && snapshot.openings_known) cJSON_AddNumberToObject(root, "openings", snapshot.openings);
     else cJSON_AddNullToObject(root, "openings");
+    if (snapshot.ha_fresh && snapshot.lights_known) cJSON_AddNumberToObject(root, "lights", snapshot.lights);
+    else cJSON_AddNullToObject(root, "lights");
     cJSON_AddStringToObject(root, "alarm", snapshot.alarm);
     cJSON_AddStringToObject(root, "weather", snapshot.weather);
     cJSON_AddStringToObject(root, "temperature", snapshot.temperature);

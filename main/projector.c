@@ -13,7 +13,6 @@
 
 #define NS "frixos"
 #define HA_TTL_US (120LL * 1000000LL)
-#define PAGE_TIMEOUT_US (30LL * 1000000LL)
 
 static SemaphoreHandle_t lock;
 static projector_snapshot_t state;
@@ -57,24 +56,25 @@ static void defaults(void)
     memset(&state, 0, sizeof(state));
     state.power = true;
     state.brightness = 30;
+    state.page_timeout = PROJECTOR_PAGE_TIMEOUT_DEFAULT;
     state.calibration = (projector_calibration_t){.center_x=64, .center_y=64, .diameter=112};
     state.page_count = 3;
-    state.pages[0] = (projector_page_t){.id="clock", .name="Ora", .layout="clock",
-        .widgets={"openings", "alarm", "date"}};
-    state.pages[1] = (projector_page_t){.id="home", .name="Casa", .layout="home",
-        .widgets={"openings", "alarm", "entity1"}};
-    state.pages[2] = (projector_page_t){.id="weather", .name="Meteo", .layout="weather",
-        .widgets={"weather", "date", "entity2"}};
+    /* clock, home and weather are fixed designs; only the list layout shows widgets. */
+    state.pages[0] = (projector_page_t){.id="clock", .name="Ora", .layout="clock"};
+    state.pages[1] = (projector_page_t){.id="home", .name="Casa", .layout="home"};
+    state.pages[2] = (projector_page_t){.id="weather", .name="Meteo", .layout="weather"};
     strcpy(state.alarm, "unknown");
+    state.humidity = PROJECTOR_UNKNOWN_PERCENT;
 }
 
-static esp_err_t save_presentation(bool power, uint8_t brightness)
+static esp_err_t save_presentation(bool power, uint8_t brightness, uint16_t page_timeout)
 {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NS, NVS_READWRITE, &handle);
     if (err != ESP_OK) return err;
     err = nvs_set_u8(handle, "proj_on", power ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, "proj_bri", brightness);
+    if (err == ESP_OK) err = nvs_set_u16(handle, "proj_return", page_timeout);
     if (err == ESP_OK) err = nvs_commit(handle);
     nvs_close(handle);
     return err;
@@ -153,18 +153,13 @@ static esp_err_t parse_pages(const cJSON *root, projector_page_t *parsed, uint8_
             !cJSON_IsString(name) || !valid_name(name->valuestring, 16, false) ||
             !cJSON_IsString(layout) || !cJSON_IsArray(widgets)) goto invalid;
         if (strcmp(layout->valuestring, "clock") && strcmp(layout->valuestring, "home") &&
-            strcmp(layout->valuestring, "weather")) goto invalid;
+            strcmp(layout->valuestring, "weather") && strcmp(layout->valuestring, "list")) goto invalid;
         if ((i == 0 && (strcmp(id->valuestring, "clock") || strcmp(layout->valuestring, "clock"))) ||
             (i != 0 && (!strcmp(id->valuestring, "clock") || !strcmp(layout->valuestring, "clock")))) goto invalid;
         for (int previous = 0; previous < i; ++previous)
             if (!strcmp(parsed[previous].id, id->valuestring)) goto invalid;
         int widget_count = cJSON_GetArraySize(widgets);
         if (widget_count > PROJECTOR_MAX_WIDGETS) goto invalid;
-        if (i == 0 && (widget_count < 2 ||
-            !cJSON_IsString(cJSON_GetArrayItem(widgets, 0)) ||
-            !cJSON_IsString(cJSON_GetArrayItem(widgets, 1)) ||
-            strcmp(cJSON_GetArrayItem(widgets, 0)->valuestring, "openings") ||
-            strcmp(cJSON_GetArrayItem(widgets, 1)->valuestring, "alarm"))) goto invalid;
         for (int j = 0; j < widget_count; ++j) {
             const cJSON *widget = cJSON_GetArrayItem(widgets, j);
             if (!cJSON_IsString(widget) || !valid_widget(widget->valuestring)) goto invalid;
@@ -214,6 +209,9 @@ esp_err_t projector_init(void)
         err = nvs_set_u8(handle, "proj_bri", state.brightness);
         if (err != ESP_OK) goto finish;
     }
+    uint16_t timeout;
+    if (nvs_get_u16(handle, "proj_return", &timeout) == ESP_OK && projector_page_timeout_valid(timeout))
+        state.page_timeout = timeout;
     if (nvs_get_u8(handle, "proj_on", &value) == ESP_OK) state.power = value != 0;
     else {
         err = nvs_set_u8(handle, "proj_on", 1);
@@ -292,6 +290,12 @@ void projector_snapshot(projector_snapshot_t *out)
         out->condition[0] = 0;
         out->temp_high_known = out->temp_low_known = false;
         for (unsigned i = 0; i < PROJECTOR_EXTRA_VALUES; ++i) out->extras[i][0] = 0;
+        out->lights_known = false;
+        out->opening_name_count = out->light_name_count = 0;
+        out->indoor[0] = out->outdoor[0] = out->feels[0] = out->wind[0] = 0;
+        out->temp_now_known = false;
+        out->humidity = PROJECTOR_UNKNOWN_PERCENT;
+        memset(out->days, 0, sizeof(out->days));
     }
     xSemaphoreGive(lock);
 }
@@ -300,7 +304,7 @@ void projector_tick(void)
 {
     xSemaphoreTake(lock, portMAX_DELAY);
     if (projector_page_timed_out(state.page_index, page_selected_us,
-                                 esp_timer_get_time(), PAGE_TIMEOUT_US))
+                                 esp_timer_get_time(), state.page_timeout * 1000000LL))
         state.page_index = 0;
     xSemaphoreGive(lock);
 }
@@ -350,6 +354,7 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(root, "brightness");
     const cJSON *page = cJSON_GetObjectItemCaseSensitive(root, "page");
     const cJSON *move = cJSON_GetObjectItemCaseSensitive(root, "move");
+    const cJSON *timeout = cJSON_GetObjectItemCaseSensitive(root, "page_timeout");
     bool invalid_move = move && (!cJSON_IsString(move) ||
         (strcmp(move->valuestring, "next") && strcmp(move->valuestring, "previous")));
     if ((power && !cJSON_IsBool(power)) ||
@@ -357,7 +362,9 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
                         brightness->valueint < 1 || brightness->valueint > 100)) ||
         (page && !cJSON_IsString(page)) ||
         invalid_move ||
-        (page && move) || (!power && !brightness && !page && !move)) {
+        (timeout && (!cJSON_IsNumber(timeout) || timeout->valuedouble != timeout->valueint ||
+                     !projector_page_timeout_valid(timeout->valueint))) ||
+        (page && move) || (!power && !brightness && !page && !move && !timeout)) {
         snprintf(error, error_size, "Invalid command");
         return ESP_ERR_INVALID_ARG;
     }
@@ -378,9 +385,10 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     }
     bool new_power = power ? cJSON_IsTrue(power) : state.power;
     uint8_t new_brightness = brightness ? brightness->valueint : state.brightness;
+    uint16_t new_timeout = timeout ? timeout->valueint : state.page_timeout;
     esp_err_t err = ESP_OK;
-    if (new_power != state.power || new_brightness != state.brightness)
-        err = save_presentation(new_power, new_brightness);
+    if (new_power != state.power || new_brightness != state.brightness || new_timeout != state.page_timeout)
+        err = save_presentation(new_power, new_brightness, new_timeout);
     if (err != ESP_OK) {
         xSemaphoreGive(lock);
         snprintf(error, error_size, "NVS write failed");
@@ -388,6 +396,7 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     }
     state.power = new_power;
     state.brightness = new_brightness;
+    state.page_timeout = new_timeout;
     state.page_index = next_page;
     if (page || move) page_selected_us = esp_timer_get_time();
     xSemaphoreGive(lock);
@@ -406,6 +415,117 @@ static bool parse_degrees(const cJSON *item, bool *known, int16_t *value)
     return true;
 }
 
+/* Optional display string: absent or null is empty, otherwise it must fit out. */
+static bool parse_text(const cJSON *item, char *out, size_t size)
+{
+    out[0] = 0;
+    if (!item || cJSON_IsNull(item)) return true;
+    if (!cJSON_IsString(item) || !valid_display_text(item->valuestring, size - 1)) return false;
+    strcpy(out, item->valuestring);
+    return true;
+}
+
+/* Optional 0-100 percentage: absent or null means unknown. */
+static bool parse_percent(const cJSON *item, int8_t *out)
+{
+    *out = PROJECTOR_UNKNOWN_PERCENT;
+    if (!item || cJSON_IsNull(item)) return true;
+    if (!cJSON_IsNumber(item) || item->valuedouble != item->valueint ||
+        item->valueint < 0 || item->valueint > 100) return false;
+    *out = item->valueint;
+    return true;
+}
+
+static bool parse_names(const cJSON *item, char names[][32], uint8_t *count)
+{
+    *count = 0;
+    if (!item) return true;
+    if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > PROJECTOR_MAX_NAMES) return false;
+    const cJSON *name;
+    cJSON_ArrayForEach(name, item) {
+        if (!cJSON_IsString(name) || !name->valuestring[0] ||
+            !parse_text(name, names[*count], 32)) return false;
+        ++*count;
+    }
+    return true;
+}
+
+static bool parse_period(const cJSON *item, projector_period_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->precipitation = PROJECTOR_UNKNOWN_PERCENT;
+    if (!item || cJSON_IsNull(item)) return true;
+    return cJSON_IsObject(item) &&
+        parse_text(cJSON_GetObjectItemCaseSensitive(item, "condition"), out->condition, sizeof(out->condition)) &&
+        parse_degrees(cJSON_GetObjectItemCaseSensitive(item, "temperature"), &out->temperature_known,
+                      &out->temperature) &&
+        parse_percent(cJSON_GetObjectItemCaseSensitive(item, "precipitation"), &out->precipitation);
+}
+
+static bool parse_day(const cJSON *item, projector_day_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->precipitation = PROJECTOR_UNKNOWN_PERCENT;
+    out->day.precipitation = out->evening.precipitation = PROJECTOR_UNKNOWN_PERCENT;
+    if (!item) return true;
+    if (!cJSON_IsObject(item)) return false;
+#define FIELD(name) cJSON_GetObjectItemCaseSensitive(item, name)
+    return parse_text(FIELD("date"), out->date, sizeof(out->date)) &&
+        parse_text(FIELD("condition"), out->condition, sizeof(out->condition)) &&
+        parse_degrees(FIELD("high"), &out->high_known, &out->high) &&
+        parse_degrees(FIELD("low"), &out->low_known, &out->low) &&
+        parse_percent(FIELD("precipitation"), &out->precipitation) &&
+        parse_text(FIELD("sunrise"), out->sunrise, sizeof(out->sunrise)) &&
+        parse_text(FIELD("sunset"), out->sunset, sizeof(out->sunset)) &&
+        parse_text(FIELD("summary"), out->summary, sizeof(out->summary)) &&
+        parse_period(FIELD("day"), &out->day) &&
+        parse_period(FIELD("evening"), &out->evening);
+#undef FIELD
+}
+
+/* Fields added after the first API version are optional, so an older HA
+ * integration keeps working; when present they must be valid. */
+typedef struct {
+    bool lights_known;
+    uint8_t lights;
+    uint8_t opening_name_count, light_name_count;
+    char opening_names[PROJECTOR_MAX_NAMES][32];
+    char light_names[PROJECTOR_MAX_NAMES][32];
+    char indoor[12], outdoor[12], feels[12], wind[16];
+    bool temp_now_known;
+    int16_t temp_now;
+    int8_t humidity;
+    projector_day_t days[PROJECTOR_FORECAST_DAYS];
+} ha_details_t;
+
+static bool parse_details(const cJSON *root, ha_details_t *out)
+{
+    memset(out, 0, sizeof(*out));
+#define FIELD(name) cJSON_GetObjectItemCaseSensitive(root, name)
+    const cJSON *lights = FIELD("lights");
+    const cJSON *lights_known = FIELD("lights_known");
+    if (lights_known && !cJSON_IsBool(lights_known)) return false;
+    if (cJSON_IsTrue(lights_known)) {
+        if (!cJSON_IsNumber(lights) || lights->valuedouble != lights->valueint ||
+            lights->valueint < 0 || lights->valueint > 99) return false;
+        out->lights_known = true;
+        out->lights = lights->valueint;
+    }
+    const cJSON *days = FIELD("days");
+    if (days && (!cJSON_IsArray(days) || cJSON_GetArraySize(days) > PROJECTOR_FORECAST_DAYS)) return false;
+    for (int i = 0; i < PROJECTOR_FORECAST_DAYS; ++i)
+        if (!parse_day(days ? cJSON_GetArrayItem(days, i) : NULL, &out->days[i])) return false;
+    return parse_names(FIELD("opening_names"), out->opening_names, &out->opening_name_count) &&
+        parse_names(FIELD("light_names"), out->light_names, &out->light_name_count) &&
+        parse_text(FIELD("indoor"), out->indoor, sizeof(out->indoor)) &&
+        parse_text(FIELD("outdoor"), out->outdoor, sizeof(out->outdoor)) &&
+        parse_text(FIELD("feels"), out->feels, sizeof(out->feels)) &&
+        parse_text(FIELD("wind"), out->wind, sizeof(out->wind)) &&
+        parse_degrees(FIELD("temp_now"), &out->temp_now_known, &out->temp_now) &&
+        parse_percent(FIELD("humidity"), &out->humidity);
+#undef FIELD
+}
+
 esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_size)
 {
     const cJSON *openings = cJSON_GetObjectItemCaseSensitive(root, "openings");
@@ -417,9 +537,12 @@ esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_si
     const cJSON *condition = cJSON_GetObjectItemCaseSensitive(root, "condition");
     bool high_known, low_known;
     int16_t high = 0, low = 0;
+    /* About 1.3 KB: static keeps it off the HTTP server task stack; requests are serialized. */
+    static ha_details_t details;
     if (!parse_degrees(cJSON_GetObjectItemCaseSensitive(root, "temp_high"), &high_known, &high) ||
         !parse_degrees(cJSON_GetObjectItemCaseSensitive(root, "temp_low"), &low_known, &low) ||
-        (condition && (!cJSON_IsString(condition) || strlen(condition->valuestring) > 15))) goto invalid;
+        (condition && (!cJSON_IsString(condition) || strlen(condition->valuestring) > 15)) ||
+        !parse_details(root, &details)) goto invalid;
     if (!cJSON_IsBool(openings_known) || !cJSON_IsNumber(openings) || openings->valuedouble != openings->valueint ||
         openings->valueint < 0 || openings->valueint > 99 || !cJSON_IsString(alarm) ||
         strlen(alarm->valuestring) > 23 || !cJSON_IsString(weather) ||
@@ -450,6 +573,20 @@ esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_si
     state.temp_low_known = low_known;
     state.temp_low = low;
     memcpy(state.extras, parsed_extras, sizeof(parsed_extras));
+    state.lights_known = details.lights_known;
+    state.lights = details.lights;
+    state.opening_name_count = details.opening_name_count;
+    state.light_name_count = details.light_name_count;
+    memcpy(state.opening_names, details.opening_names, sizeof(state.opening_names));
+    memcpy(state.light_names, details.light_names, sizeof(state.light_names));
+    strcpy(state.indoor, details.indoor);
+    strcpy(state.outdoor, details.outdoor);
+    strcpy(state.feels, details.feels);
+    strcpy(state.wind, details.wind);
+    state.temp_now_known = details.temp_now_known;
+    state.temp_now = details.temp_now;
+    state.humidity = details.humidity;
+    memcpy(state.days, details.days, sizeof(state.days));
     ha_received_us = esp_timer_get_time();
     xSemaphoreGive(lock);
     return ESP_OK;

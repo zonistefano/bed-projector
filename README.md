@@ -23,9 +23,11 @@ HACS installa e aggiorna solo l'integrazione Home Assistant. Il firmware ESP32 e
 
 ## Cosa puoi fare
 
-- Usare tre pagine iniziali (**Ora**, **Casa**, **Meteo**) e configurarne fino a cinque, con tre widget per pagina. La pagina Ora resta sempre la prima.
-- Vedere sulla pagina Ora la previsione di oggi (icona, massima e minima), le porte e finestre aperte (solo se ce ne sono) e la modalità dell'allarme con le stesse icone di Home Assistant (disinserito, in casa, fuori casa, notte, vacanza, personalizzato, inserimento, attesa, scattato).
-- Scorrere o scegliere una pagina da Home Assistant o dalla web UI. Dopo 30 secondi su una pagina secondaria ricompare l'ora.
+- Usare tre pagine con design dedicato e aggiungerne fino a cinque in totale, anche con il modello **Elenco** a tre widget. La pagina Ora resta sempre la prima.
+- **Ora:** previsione (icona, massima e minima in grassetto; dalle 21 quella di domani), l'ora, icone di porte/finestre aperte, luci accese (esclusa la proiezione) e allarme inserito solo quando servono, e una riga che scorre con data, alba e tramonto.
+- **Casa:** stato dell'allarme, temperatura della camera e quella esterna, nomi delle porte/finestre aperte e delle luci accese in righe che scorrono.
+- **Meteo:** condizioni attuali (temperatura, percepita, umidità, vento) e la giornata che ci aspetta divisa in giorno e sera, con probabilità di pioggia e riepilogo testuale.
+- Scorrere o scegliere una pagina da Home Assistant o dalla web UI. Su una pagina secondaria l'ora ricompare dopo un tempo regolabile da web UI o Home Assistant (30 secondi di default, oppure mai).
 - Regolare la luminosità da 1 a 100%. **Off** spegne il LED di proiezione, mentre ESP32, Wi-Fi e display continuano a funzionare. Livello e stato acceso/spento sono persistenti.
 - Centrare il cerchio proiettato, regolarne il diametro e ruotare (a passi di 90°) o specchiare il contenuto dalla web UI locale. Durante la regolazione appaiono una croce, il bordo e la scritta «SU»; geometria e orientamento salvati si applicano a tutte le pagine e non sono esposti a Home Assistant.
 - Ricevere dati da Home Assistant all'avvio, ai cambiamenti e ogni 60 secondi. Dopo 120 secondi senza aggiornamenti, i dati diventano sconosciuti; l'ora continua a funzionare.
@@ -45,6 +47,9 @@ python3 -m unittest discover -s tests -v
 cc -std=c11 -Wall -Wextra -Werror -I main main/projector_logic.c tests/test_firmware_logic.c -o /tmp/bed-projector-logic
 /tmp/bed-projector-logic
 idf.py build
+python3 tools/render_preview.py   # anteprime PNG delle pagine in build/preview/
 ```
+
+`tools/render_preview.py` compila le pagine e LVGL sul computer, con le stesse opzioni del firmware, e salva un'immagine per scenario (serve una prima `idf.py build` per scaricare LVGL). Font e icone sono generati da `tools/generate_fonts.py` (richiede `pip install fonttools`) e `tools/generate_icons.py`.
 
 Il progetto usa partizioni da **4 MB**, con due slot OTA e SPIFFS. La build verifica che il firmware entri nello slot; i controlli su proiezione, rete e aggiornamento richiedono la scheda fisica.

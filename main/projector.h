@@ -9,6 +9,12 @@
 #define PROJECTOR_MAX_PAGES 5
 #define PROJECTOR_MAX_WIDGETS 3
 #define PROJECTOR_EXTRA_VALUES 4
+#define PROJECTOR_MAX_NAMES 8
+#define PROJECTOR_FORECAST_DAYS 2
+#define PROJECTOR_UNKNOWN_PERCENT -1
+/* Seconds on a secondary page before the clock returns; 0 keeps the page.
+ * projector_page_timeout_valid() holds the accepted range. */
+#define PROJECTOR_PAGE_TIMEOUT_DEFAULT 30
 
 typedef struct {
     char id[17];
@@ -27,11 +33,36 @@ typedef struct {
     bool active;
 } projector_calibration_t;
 
+/* Part of a forecast day (daytime or evening); an empty condition means unknown. */
+typedef struct {
+    char condition[16];
+    bool temperature_known;
+    int16_t temperature;
+    int8_t precipitation; /* Percent or PROJECTOR_UNKNOWN_PERCENT. */
+} projector_period_t;
+
+/* One forecast day as sent by HA; date is HA's local YYYY-MM-DD, empty if unused. */
+typedef struct {
+    char date[11];
+    char condition[16];
+    bool high_known;
+    bool low_known;
+    int16_t high;
+    int16_t low;
+    int8_t precipitation;
+    char sunrise[6]; /* Local HH:MM, empty if unknown. */
+    char sunset[6];
+    char summary[64];
+    projector_period_t day;
+    projector_period_t evening;
+} projector_day_t;
+
 typedef struct {
     bool power;
     uint8_t brightness;
     uint8_t page_count;
     uint8_t page_index;
+    uint16_t page_timeout; /* Seconds, 0 = never return to the clock. */
     projector_page_t pages[PROJECTOR_MAX_PAGES];
     bool ha_fresh;
     bool openings_known;
@@ -45,6 +76,20 @@ typedef struct {
     int16_t temp_high;
     int16_t temp_low;
     char extras[PROJECTOR_EXTRA_VALUES][32];
+    bool lights_known;
+    uint8_t lights;
+    uint8_t opening_name_count;
+    uint8_t light_name_count;
+    char opening_names[PROJECTOR_MAX_NAMES][32];
+    char light_names[PROJECTOR_MAX_NAMES][32];
+    char indoor[12];  /* Preformatted, e.g. "21.5°"; empty if unknown. */
+    char outdoor[12];
+    bool temp_now_known;
+    int16_t temp_now;
+    char feels[12];
+    char wind[16];
+    int8_t humidity;
+    projector_day_t days[PROJECTOR_FORECAST_DAYS];
     bool wifi_connected;
     projector_calibration_t calibration;
 } projector_snapshot_t;
