@@ -1,0 +1,41 @@
+show_message:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: bed_projector
+    message:
+      required: true
+      example: Lavatrice finita
+      selector:
+        text:
+    icon:
+      selector:
+        select:
+          translation_key: icon
+          options:
+            - "bell"
+            - "information"
+            - "alert"
+            - "washing-machine"
+            - "package-variant"
+            - "door-open"
+            - "lightbulb-on"
+            - "phone"
+            - "alarm"
+            - "calendar"
+    duration:
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 3600
+          unit_of_measurement: s
+clear_message:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: bed_projector

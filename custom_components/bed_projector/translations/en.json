@@ -1,0 +1,110 @@
+{
+  "config": {
+    "flow_title": "Bed Projector ({host})",
+    "step": {
+      "user": {
+        "title": "Connect Bed Projector",
+        "data": {
+          "host": "Host or IP address",
+          "port": "Port",
+          "token": "Local token"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Bed Projector found",
+        "description": "Home Assistant found a Bed Projector at {host}. Enter the local token to connect it.",
+        "data": {
+          "token": "Local token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the device: check host and port",
+      "invalid_auth": "Invalid token: use API_TOKEN from the .env file"
+    },
+    "abort": {
+      "already_configured": "This projector is already configured",
+      "not_supported": "The discovered device is not a compatible Bed Projector"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Data to project",
+        "data": {
+          "opening_list": "Doors/windows listed by name (empty: every door/window contact)",
+          "opening_template": "Open doors/windows template (replaces the list: comma-separated names)",
+          "light_list": "Lights listed by name (empty: every light except groups and the projector)",
+          "light_template": "Lights on template (replaces the list: comma-separated names)",
+          "alarm": "Alarm control panel",
+          "weather": "Weather entity",
+          "indoor": "Bedroom temperature",
+          "outdoor": "Outdoor temperature (empty: the weather entity's)",
+          "summary_today": "Today's weather summary (e.g. sensor.pirateweather_summary_0d)",
+          "summary_tomorrow": "Tomorrow's weather summary (e.g. sensor.pirateweather_summary_1d)",
+          "next_alarm": "Next alarm (timestamp sensor, e.g. sensor.phone_next_alarm, or input_datetime)",
+          "calendars": "Calendars for the Agenda page",
+          "climate_heat": "Radiator thermostat (winter)",
+          "climate_cool": "Air conditioner thermostat (summer)",
+          "entity1": "Additional data 1",
+          "entity2": "Additional data 2",
+          "entity3": "Additional data 3",
+          "entity4": "Additional data 4"
+        }
+      }
+    },
+    "error": {
+      "invalid_template": "Invalid template: check the syntax"
+    }
+  },
+  "services": {
+    "show_message": {
+      "name": "Show message",
+      "description": "Shows a temporary message over every projector page.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Projector",
+          "description": "The Bed Projector that shows the message."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Text to project, at most 63 bytes; # is removed."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Icon above the text; a bell when none is chosen."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Seconds before the message disappears (5-3600)."
+        }
+      }
+    },
+    "clear_message": {
+      "name": "Clear message",
+      "description": "Removes the projector's message right away.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Projector",
+          "description": "The Bed Projector to clear."
+        }
+      }
+    }
+  },
+  "selector": {
+    "icon": {
+      "options": {
+        "bell": "Bell",
+        "information": "Information",
+        "alert": "Alert",
+        "washing-machine": "Washing machine",
+        "package-variant": "Package",
+        "door-open": "Open door",
+        "lightbulb-on": "Light on",
+        "phone": "Phone",
+        "alarm": "Alarm clock",
+        "calendar": "Calendar"
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Integration and build-config tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Firmware logic tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -I main main/projector_logic.c \
+            tests/test_firmware_logic.c -o "$RUNNER_TEMP/logic"
+          "$RUNNER_TEMP/logic"
+      - name: Integration syntax
+        run: python3 -m py_compile custom_components/bed_projector/*.py
+
+  firmware:
+    name: Firmware build
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with a throwaway .env
+        shell: bash
+        run: |
+          printf 'WIFI_SSID=ci\nWIFI_PASSWORD=ci-password\nAPI_TOKEN=%s\n' \
+            "$(python3 -c 'import secrets; print(secrets.token_hex(16))')" > .env
+          . "$IDF_PATH/export.sh"
+          idf.py build

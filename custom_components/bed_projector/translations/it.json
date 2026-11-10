@@ -1,0 +1,110 @@
+{
+  "config": {
+    "flow_title": "Bed Projector ({host})",
+    "step": {
+      "user": {
+        "title": "Collega Bed Projector",
+        "data": {
+          "host": "Host o indirizzo IP",
+          "port": "Porta",
+          "token": "Token locale"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Bed Projector trovato",
+        "description": "Home Assistant ha trovato un Bed Projector all'indirizzo {host}. Inserisci il token locale per collegarlo.",
+        "data": {
+          "token": "Token locale"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossibile raggiungere il dispositivo: controlla indirizzo e porta",
+      "invalid_auth": "Token non valido: usa API_TOKEN del file .env"
+    },
+    "abort": {
+      "already_configured": "Questo proiettore è già configurato",
+      "not_supported": "Il dispositivo trovato non è un Bed Projector compatibile"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dati da proiettare",
+        "data": {
+          "opening_list": "Porte/finestre da elencare per nome (vuoto: tutti i contatti porta/finestra)",
+          "opening_template": "Template porte/finestre aperte (sostituisce l'elenco: nomi separati da virgola)",
+          "light_list": "Luci da elencare per nome (vuoto: tutte le luci tranne gruppi e proiettore)",
+          "light_template": "Template luci accese (sostituisce l'elenco: nomi separati da virgola)",
+          "alarm": "Centrale d'allarme",
+          "weather": "Entità meteo",
+          "indoor": "Temperatura camera da letto",
+          "outdoor": "Temperatura esterna (vuoto: quella dell'entità meteo)",
+          "summary_today": "Riepilogo meteo di oggi (es. sensor.pirateweather_summary_0d)",
+          "summary_tomorrow": "Riepilogo meteo di domani (es. sensor.pirateweather_summary_1d)",
+          "next_alarm": "Prossima sveglia (sensore timestamp, es. sensor.telefono_next_alarm, oppure input_datetime)",
+          "calendars": "Calendari per la pagina Agenda",
+          "climate_heat": "Termostato caloriferi (inverno)",
+          "climate_cool": "Termostato condizionatore (estate)",
+          "entity1": "Dato aggiuntivo 1",
+          "entity2": "Dato aggiuntivo 2",
+          "entity3": "Dato aggiuntivo 3",
+          "entity4": "Dato aggiuntivo 4"
+        }
+      }
+    },
+    "error": {
+      "invalid_template": "Template non valido: controlla la sintassi"
+    }
+  },
+  "services": {
+    "show_message": {
+      "name": "Mostra messaggio",
+      "description": "Mostra un messaggio temporaneo sopra tutte le pagine del proiettore.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Proiettore",
+          "description": "Il Bed Projector su cui mostrare il messaggio."
+        },
+        "message": {
+          "name": "Messaggio",
+          "description": "Testo da proiettare, al massimo 63 byte; il carattere # viene rimosso."
+        },
+        "icon": {
+          "name": "Icona",
+          "description": "Icona sopra il testo; senza scelta compare la campanella."
+        },
+        "duration": {
+          "name": "Durata",
+          "description": "Secondi prima che il messaggio scompaia (5-3600)."
+        }
+      }
+    },
+    "clear_message": {
+      "name": "Togli messaggio",
+      "description": "Toglie subito il messaggio mostrato dal proiettore.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Proiettore",
+          "description": "Il Bed Projector da cui togliere il messaggio."
+        }
+      }
+    }
+  },
+  "selector": {
+    "icon": {
+      "options": {
+        "bell": "Campanella",
+        "information": "Informazione",
+        "alert": "Avviso",
+        "washing-machine": "Lavatrice",
+        "package-variant": "Pacco",
+        "door-open": "Porta aperta",
+        "lightbulb-on": "Luce accesa",
+        "phone": "Telefono",
+        "alarm": "Sveglia",
+        "calendar": "Calendario"
+      }
+    }
+  }
+}
