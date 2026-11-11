@@ -100,7 +100,10 @@ int main(void)
     assert(!strcmp(date, "2028-02-29"));
     projector_date_after(2026, 2, 28, 1, date);
     assert(!strcmp(date, "2026-03-01"));
-    assert(!projector_shows_tomorrow(20) && projector_shows_tomorrow(21));
+    assert(!projector_shows_tomorrow(20, PROJECTOR_TOMORROW_DEFAULT));
+    assert(projector_shows_tomorrow(21, PROJECTOR_TOMORROW_DEFAULT));
+    assert(projector_shows_tomorrow(18, 18) && !projector_shows_tomorrow(17, 18));
+    assert(projector_shows_tomorrow(0, 0) && !projector_shows_tomorrow(23, PROJECTOR_TOMORROW_NEVER));
     assert(projector_wake_next_morning(22, 1, 6) && projector_wake_next_morning(12, 1, 11));
     assert(projector_wake_next_morning(2, 0, 7) && projector_wake_next_morning(11, 0, 11));
     assert(!projector_wake_next_morning(22, 0, 6) && !projector_wake_next_morning(2, 1, 6));
@@ -132,6 +135,39 @@ int main(void)
     assert(!strcmp(tenths, "-0.5"));
     projector_format_tenths(-120, tenths, sizeof(tenths));
     assert(!strcmp(tenths, "-12"));
+    /* Page schema: names round-trip, default modes are index 0, unknown names are rejected. */
+    assert(projector_layout_index("clock") == LAYOUT_CLOCK && projector_layout_index("list") == LAYOUT_LIST);
+    assert(projector_layout_index("bogus") == -1 && projector_layout_index(NULL) == -1);
+    for (int layout = 0; layout < LAYOUT_COUNT; ++layout) {
+        const projector_layout_t *l = &projector_layouts[layout];
+        assert(l->element_count >= 1 && l->element_count <= PROJECTOR_MAX_ELEMENTS);
+        for (int element = 0; element < l->element_count; ++element) {
+            assert(projector_element_index(layout, l->elements[element].name) == element);
+            assert(l->elements[element].mode_count >= 2);
+            for (int mode = 0; mode < l->elements[element].mode_count; ++mode)
+                assert(projector_mode_index(layout, element, l->elements[element].modes[mode]) == mode);
+        }
+    }
+    assert(projector_element_index(LAYOUT_CLOCK, "wake") == CLOCK_WAKE);
+    assert(projector_mode_index(LAYOUT_CLOCK, CLOCK_WAKE, "countdown") == WAKE_COUNTDOWN);
+    assert(projector_mode_index(LAYOUT_CLOCK, CLOCK_WAKE, "names") == -1);
+    assert(projector_mode_index(LAYOUT_HOME, HOME_OPENINGS, "count") == NAMES_COUNT);
+    assert(projector_mode_index(LAYOUT_AGENDA, AGENDA_EVENTS, "1") == EVENTS_1);
+    assert(projector_mode_index(LAYOUT_CLIMATE, CLIMATE_STATUS, "icon") == LABELED_ICON);
+    assert(projector_element_index(LAYOUT_HOME, "wake") == -1 && projector_element_index(LAYOUT_COUNT, "wake") == -1);
+    assert(projector_name_index("thermostat", projector_widgets, WIDGET_COUNT) == WIDGET_THERMOSTAT);
+    assert(projector_name_index("icon_value", projector_styles, STYLE_COUNT) == STYLE_ICON_VALUE);
+    assert(projector_name_index("huge", projector_sizes, SIZE_COUNT) == -1);
+    assert(projector_size_level(0, SIZE_LARGE) == 0 && projector_size_level(1, SIZE_LARGE) == 0);
+    assert(projector_size_level(3, SIZE_SMALL) == 3 && projector_size_level(1, SIZE_SMALL) == 2);
+    assert(projector_size_level(2, SIZE_NORMAL) == 2);
+    /* Palettes: colour unchanged, black stays black, white takes the tint. */
+    assert(projector_tint(0x123456, PALETTE_COLOR, 0xffffff) == 0x123456);
+    assert(projector_tint(0x000000, PALETTE_MONO, 0xffb36b) == 0);
+    assert(projector_tint(0xffffff, PALETTE_MONO, 0xffb36b) == 0xffb36b);
+    assert(projector_tint(0xffffff, PALETTE_RED, 0x00ff00) == 0xff2000);
+    uint32_t dim = projector_tint(0x6a7482, PALETTE_RED, 0);
+    assert((dim & 0xff) == 0 && ((dim >> 8) & 0xff) < 0x10 && (dim >> 16) > 0x40 && (dim >> 16) < 0x80);
     for (unsigned rotation = 0; rotation < 4; ++rotation) {
         assert_circle_fixed(rotation, false);
         assert_circle_fixed(rotation, true);

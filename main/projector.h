@@ -5,9 +5,10 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "cJSON.h"
+#include "projector_logic.h"
 
 #define PROJECTOR_MAX_PAGES 5
-#define PROJECTOR_MAX_WIDGETS 3
+#define PROJECTOR_MAX_WIDGETS 4
 #define PROJECTOR_EXTRA_VALUES 4
 #define PROJECTOR_MAX_NAMES 8
 #define PROJECTOR_FORECAST_DAYS 2
@@ -21,13 +22,31 @@
  * projector_page_timeout_valid() holds the accepted range. */
 #define PROJECTOR_PAGE_TIMEOUT_DEFAULT 30
 
+/* One line of a list page. */
+typedef struct {
+    uint8_t type;  /* WIDGET_* */
+    uint8_t style; /* STYLE_* */
+    char text[33]; /* Free text of a WIDGET_TEXT line. */
+} projector_widget_t;
+
+/* A page and how it shows its elements; see the page schema in projector_logic.h. */
 typedef struct {
     char id[17];
     char name[17];
-    char layout[9];
-    char widgets[PROJECTOR_MAX_WIDGETS][17];
-    char text[33];
+    uint8_t layout;        /* LAYOUT_* */
+    uint8_t size;          /* SIZE_* */
+    uint8_t tomorrow_from; /* Clock and weather: hour from which tomorrow's forecast shows. */
+    uint8_t show[PROJECTOR_MAX_ELEMENTS]; /* Mode of each element of the layout. */
+    uint8_t widget_count;
+    projector_widget_t widgets[PROJECTOR_MAX_WIDGETS];
 } projector_page_t;
+
+/* Look shared by every page. */
+typedef struct {
+    uint8_t palette; /* PALETTE_* */
+    uint32_t tint;   /* 0xrrggbb, used by PALETTE_MONO. */
+    bool dots;       /* Page indicator on secondary pages. */
+} projector_theme_t;
 
 typedef struct {
     uint8_t center_x;
@@ -127,8 +146,9 @@ typedef struct {
     uint8_t page_count;
     uint8_t page_index;
     uint16_t page_timeout; /* Seconds, 0 = never return to the clock. */
-    char wake_display[10]; /* Clock page wake alarm: "none", "icon", "time" or "countdown". */
     projector_page_t pages[PROJECTOR_MAX_PAGES];
+    projector_theme_t theme;
+    bool preview;          /* Pages and theme are an unsaved trial from the web UI. */
     bool ha_fresh;         /* False after HA_TTL without updates: ha is then all unknown. */
     projector_ha_t ha;
     bool wifi_connected;
@@ -140,6 +160,7 @@ esp_err_t projector_init(void);
 void projector_snapshot(projector_snapshot_t *out);
 void projector_tick(void);
 esp_err_t projector_set_pages(const cJSON *root, char *error, size_t error_size);
+esp_err_t projector_preview_pages(const cJSON *root, char *error, size_t error_size);
 cJSON *projector_pages_json(void);
 esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_size);
 esp_err_t projector_set_ha_state(const cJSON *root, char *error, size_t error_size);

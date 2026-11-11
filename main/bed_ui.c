@@ -12,13 +12,11 @@
 #define VALID_TIME 1577836800
 /* Marquee speed in pixels per second: slow enough to read lying in bed. */
 #define MARQUEE_SPEED 16
-#define RECOLOR(color, text) "#" color " " text "#"
 
 /* Palette for a projection on a dark ceiling: dim colours fade first, so even
  * secondary text stays above ~40% brightness. */
 #define COLOR_TEXT 0xf2f4f8
 #define COLOR_MUTED 0xa8b2c0
-#define HEX_MUTED "a8b2c0" /* COLOR_MUTED for RECOLOR markup. */
 #define COLOR_DIM 0x6a7482
 #define COLOR_LINE 0x3a4250
 #define COLOR_WARM 0xffb36b
@@ -26,7 +24,10 @@
 #define COLOR_OPEN 0xffa040
 #define COLOR_LIGHT 0xffd54a
 #define COLOR_OK 0x6fd08c
-#define HEX_RAIN "6fb0ff"
+#define COLOR_RAIN 0x6fb0ff
+#define COLOR_WIND 0xc8d0da
+#define COLOR_SUNRISE 0xffc860
+#define COLOR_SUNSET 0xff8c60
 
 static const lv_font_t *const clock_fonts[] = {&bed_font_clock_46, &bed_font_clock_40,
     &bed_font_clock_34, &bed_font_clock_28};
@@ -140,12 +141,35 @@ static struct {
 } climate_ui;
 
 static struct {
-    lv_obj_t *page, *header, *lines[3];
+    lv_obj_t *page, *header, *icons[PROJECTOR_MAX_WIDGETS], *lines[PROJECTOR_MAX_WIDGETS];
 } list_ui;
 
 static struct {
     lv_obj_t *page, *icon, *lines[2];
 } message_ui;
+
+/* Palette of the frame being drawn: every colour goes through paint(). */
+static projector_theme_t theme = {.palette = PALETTE_COLOR};
+
+static uint32_t paint(uint32_t color)
+{
+    return projector_tint(color, theme.palette, theme.tint);
+}
+
+/* "rrggbb" of a painted colour for "#rrggbb text#" markup. Each call returns its own buffer
+ * of a small ring, so one snprintf can take several. */
+static const char *hex(uint32_t color)
+{
+    static char buffers[8][7];
+    static int next;
+    char *out = buffers[next++ % 8];
+    snprintf(out, 7, "%06lx", (unsigned long)paint(color));
+    return out;
+}
+
+/* Hairlines, repainted when the palette changes. */
+static lv_obj_t *hairlines[4];
+static int hairline_count;
 
 /* One square per page, shown on secondary pages. */
 static lv_obj_t *page_dots[PROJECTOR_MAX_PAGES];
@@ -176,14 +200,14 @@ static void set_font(lv_obj_t *obj, const lv_font_t *font)
 
 static void set_color(lv_obj_t *obj, uint32_t color)
 {
-    lv_color_t value = lv_color_hex(color);
+    lv_color_t value = lv_color_hex(paint(color));
     if (!lv_color_eq(lv_obj_get_style_text_color(obj, 0), value))
         lv_obj_set_style_text_color(obj, value, 0);
 }
 
 static void set_background(lv_obj_t *obj, uint32_t color)
 {
-    lv_color_t value = lv_color_hex(color);
+    lv_color_t value = lv_color_hex(paint(color));
     if (!lv_color_eq(lv_obj_get_style_bg_color(obj, 0), value)) lv_obj_set_style_bg_color(obj, value, 0);
 }
 
@@ -307,6 +331,7 @@ static lv_obj_t *new_line(lv_obj_t *parent)
     lv_obj_set_style_bg_color(line, lv_color_hex(COLOR_LINE), 0);
     lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
     show(line, false);
+    hairlines[hairline_count++] = line;
     return line;
 }
 
@@ -484,6 +509,26 @@ static void layout_icon_text(lv_obj_t *icon_obj, const char *icon, uint32_t icon
     place_on_row(text_obj, font, left + icon_width + gap, text_box, y, height);
 }
 
+/* An icon and a label as a LABELED_* mode shows them: both, the label alone or the icon alone.
+ * LABELED_OFF hides both. */
+static void layout_labeled(int mode, lv_obj_t *icon_obj, const char *icon, uint32_t icon_color,
+                           const lv_font_t *icon_font, lv_obj_t *text_obj, const char *text, uint32_t color,
+                           const lv_font_t *font, int diameter, int y, int height)
+{
+    show(icon_obj, mode == LABELED_ICON_LABEL || mode == LABELED_ICON);
+    show(text_obj, mode == LABELED_ICON_LABEL || mode == LABELED_LABEL);
+    if (mode == LABELED_ICON_LABEL)
+        layout_icon_text(icon_obj, icon, icon_color, icon_font, text_obj, text, color, font, diameter, y,
+                         height);
+    else if (mode == LABELED_LABEL)
+        place_marquee(text_obj, text, font, color, diameter, y, height);
+    else if (mode == LABELED_ICON) {
+        int width = text_width(icon, icon_font);
+        set_label(icon_obj, icon, icon_font, icon_color);
+        place_on_row(icon_obj, icon_font, diameter / 2 - width / 2, width, y, height);
+    }
+}
+
 /* Vertical stack of rows centred in the circle with even gaps between inks. */
 static int stack_top(int diameter, const int *heights, int count, int gap)
 {
@@ -508,26 +553,30 @@ static int size_level(int diameter)
 
 /* ---- Clock page: forecast, time, conditional house status, scrolling date. ---- */
 
-static void render_clock(const projector_snapshot_t *s, const struct tm *local, bool valid_time,
-                         int diameter)
+static void render_clock(const projector_snapshot_t *s, const projector_page_t *page, const struct tm *local,
+                         bool valid_time, int diameter)
 {
-    int level = size_level(diameter);
-    /* Until 21:00 today's forecast, then tomorrow's. */
-    bool tomorrow = valid_time && projector_shows_tomorrow(local->tm_hour);
+    int level = projector_size_level(size_level(diameter), page->size);
+    /* Until tomorrow_from (21:00 by default) today's forecast, then tomorrow's. */
+    bool tomorrow = valid_time && projector_shows_tomorrow(local->tm_hour, page->tomorrow_from);
     const projector_day_t *day = forecast_day(s, local, valid_time, tomorrow ? 1 : 0);
     weather_look_t look;
-    bool weather = day && weather_look(day->condition, false, &look);
+    int forecast_mode = page->show[CLOCK_FORECAST];
+    bool weather = forecast_mode != FORECAST_OFF && day && weather_look(day->condition, false, &look);
     bool high_known = weather && day->high_known, low_known = weather && day->low_known;
     int high = weather ? day->high : 0, low = weather ? day->low : 0;
     char high_text[12], low_text[12];
     degrees(high_text, sizeof(high_text), high_known, high);
     degrees(low_text, sizeof(low_text), low_known, low);
-    row_item_t weather_row[3] = {
+    row_item_t weather_items[3] = {
         {clock_ui.weather_icon, weather ? look.icon : "", icon_fonts, ARRAY_COUNT(icon_fonts),
          level + 1, weather ? look.color : 0, 0},
         {clock_ui.high, high_text, bold_fonts, ARRAY_COUNT(bold_fonts), level + 1, COLOR_WARM, 5},
         {clock_ui.low, low_text, bold_fonts, ARRAY_COUNT(bold_fonts), level + 1, COLOR_COOL, 6},
     };
+    /* The forecast row: icon and temperatures, the temperatures alone or the icon alone. */
+    row_item_t *weather_row = weather_items + (forecast_mode == FORECAST_TEMPS ? 1 : 0);
+    int weather_count = forecast_mode == FORECAST_TEMPS ? 2 : forecast_mode == FORECAST_ICON ? 1 : 3;
 
     char time_text[8] = "--:--";
     if (valid_time) snprintf(time_text, sizeof(time_text), "%02d:%02d", local->tm_hour, local->tm_min);
@@ -535,18 +584,21 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
                                COLOR_TEXT, 0}};
 
     /* Status icons appear only when something needs attention. An unusable door
-     * count must never look like "all closed", so it shows as a grey "?". The
-     * morning alarm is the exception: a known "none" shows as a dim crossed bell,
-     * while an unknown one is left out rather than passing for either. */
+     * count must never look like "all closed", so it shows as a grey "?", even when
+     * the page shows icons alone. The morning alarm is the exception: a known "none"
+     * shows as a dim crossed bell, while an unknown one is left out rather than
+     * passing for either. */
+    int doors_mode = page->show[CLOCK_OPENINGS], lights_mode = page->show[CLOCK_LIGHTS];
+    int wake_mode = page->show[CLOCK_WAKE];
     bool doors_known = s->ha_fresh && s->ha.openings_known;
-    bool doors = !doors_known || s->ha.openings;
-    bool lights = s->ha_fresh && s->ha.lights_known && s->ha.lights;
+    bool doors = doors_mode != STATUS_OFF && (!doors_known || s->ha.openings);
+    bool lights = lights_mode != STATUS_OFF && s->ha_fresh && s->ha.lights_known && s->ha.lights;
     const alarm_mode_t *alarm = alarm_mode(s);
-    bool alarm_visible = strcmp(alarm->state, "disarmed");
+    bool alarm_visible = page->show[CLOCK_ALARM] == SHOW_ON && strcmp(alarm->state, "disarmed");
     char door_count[4] = "?", light_count[4];
     if (doors_known) snprintf(door_count, sizeof(door_count), "%u", s->ha.openings);
     snprintf(light_count, sizeof(light_count), "%u", s->ha.lights);
-    bool wake_known = valid_time && s->ha_fresh && s->ha.wake_known && strcmp(s->wake_display, "none");
+    bool wake_known = valid_time && s->ha_fresh && s->ha.wake_known && wake_mode != WAKE_OFF;
     int wake_day = wake_known && s->ha.wake_date[0] ?
         projector_relative_day(local->tm_year + 1900, local->tm_mon + 1, local->tm_mday,
                                s->ha.wake_date) : -1;
@@ -555,9 +607,9 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
     bool wake = wake_day >= 0 && projector_wake_next_morning(local->tm_hour, wake_day, wake_hour);
     /* Beside an orange bell, optionally the alarm time or the time left until it. */
     char wake_text[12] = "";
-    if (wake && !strcmp(s->wake_display, "time"))
+    if (wake && wake_mode == WAKE_TIME)
         snprintf(wake_text, sizeof(wake_text), "%s", s->ha.wake_time);
-    else if (wake && !strcmp(s->wake_display, "countdown"))
+    else if (wake && wake_mode == WAKE_COUNTDOWN)
         projector_format_countdown(local->tm_hour, local->tm_min, wake_day, wake_hour, wake_minute,
                                    wake_text, sizeof(wake_text));
     row_item_t status_row[7];
@@ -569,14 +621,16 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
         uint32_t color = doors_known ? COLOR_OPEN : COLOR_DIM;
         status_row[status++] = (row_item_t){clock_ui.door_icon, BED_ICON_DOOR_OPEN, icon_fonts,
             ARRAY_COUNT(icon_fonts), status_level, color, 0};
-        status_row[status++] = (row_item_t){clock_ui.door_count, door_count, bold_fonts,
-            ARRAY_COUNT(bold_fonts), status_level + 1, color, 1};
+        if (doors_mode == STATUS_COUNT || !doors_known)
+            status_row[status++] = (row_item_t){clock_ui.door_count, door_count, bold_fonts,
+                ARRAY_COUNT(bold_fonts), status_level + 1, color, 1};
     }
     if (lights) {
         status_row[status++] = (row_item_t){clock_ui.light_icon, BED_ICON_LIGHTBULB_ON, icon_fonts,
             ARRAY_COUNT(icon_fonts), status_level, COLOR_LIGHT, status ? group_gap : 0};
-        status_row[status++] = (row_item_t){clock_ui.light_count, light_count, bold_fonts,
-            ARRAY_COUNT(bold_fonts), status_level + 1, COLOR_LIGHT, 1};
+        if (lights_mode == STATUS_COUNT)
+            status_row[status++] = (row_item_t){clock_ui.light_count, light_count, bold_fonts,
+                ARRAY_COUNT(bold_fonts), status_level + 1, COLOR_LIGHT, 1};
     }
     if (alarm_visible)
         status_row[status++] = (row_item_t){clock_ui.alarm_icon, alarm->icon, icon_fonts,
@@ -591,22 +645,30 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
         status_row[status++] = (row_item_t){clock_ui.wake_text, wake_text, text_fonts,
             ARRAY_COUNT(text_fonts), level >= 2 ? 2 : 1, COLOR_WARM, 2};
 
-    char date[96] = "In attesa dell'ora";
+    /* The date line: the date in full or short, then sunrise and sunset. */
+    int date_mode = page->show[CLOCK_DATE];
+    char date[128] = "";
     const projector_day_t *today = forecast_day(s, local, valid_time, 0);
-    if (valid_time) {
-        int used = snprintf(date, sizeof(date), "%s %d %s", weekdays[local->tm_wday], local->tm_mday,
+    if (!valid_time) {
+        if (date_mode != DATE_OFF) snprintf(date, sizeof(date), "In attesa dell'ora");
+    } else {
+        int used = 0;
+        if (date_mode == DATE_FULL)
+            used = snprintf(date, sizeof(date), "%s %d %s", weekdays[local->tm_wday], local->tm_mday,
                             months[local->tm_mon]);
-        if (today && today->sunrise[0] && today->sunset[0])
+        else if (date_mode == DATE_SHORT)
+            used = snprintf(date, sizeof(date), "%s %d", weekdays[local->tm_wday], local->tm_mday);
+        if (page->show[CLOCK_SUN] == SHOW_ON && today && today->sunrise[0] && today->sunset[0])
             snprintf(date + used, sizeof(date) - used,
-                     "   " RECOLOR("ffc860", BED_ICON_SUNRISE) " " RECOLOR(HEX_MUTED, "%s")
-                     "   " RECOLOR("ff8c60", BED_ICON_SUNSET) " " RECOLOR(HEX_MUTED, "%s"),
-                     today->sunrise, today->sunset);
+                     "%s#%s " BED_ICON_SUNRISE "# #%s %s#   #%s " BED_ICON_SUNSET "# #%s %s#",
+                     used ? "   " : "", hex(COLOR_SUNRISE), hex(COLOR_MUTED), today->sunrise, hex(COLOR_SUNSET), hex(COLOR_MUTED),
+                     today->sunset);
     }
     const lv_font_t *date_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
     /* The date row ink includes the inline icons, which reach above the digits. */
-    int date_height = lv_font_get_line_height(date_font) - 4;
+    int date_height = date[0] ? lv_font_get_line_height(date_font) - 4 : 0;
 
-    int heights[5] = {weather ? row_height(weather_row, 3) : 0, row_height(time_row, 1),
+    int heights[5] = {weather ? row_height(weather_row, weather_count) : 0, row_height(time_row, 1),
                       status ? row_height(status_row, status) : 0, 0, date_height};
     int gap = level >= 2 ? 5 : 7;
     int y = stack_top(diameter, heights, 5, gap);
@@ -628,11 +690,9 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
             y = stack_top(diameter, heights, 5, gap);
         }
     }
-    show(clock_ui.weather_icon, weather);
-    show(clock_ui.high, weather);
-    show(clock_ui.low, weather);
+    for (int i = 0; i < 3; ++i) show(weather_items[i].obj, false);
     if (weather) {
-        layout_row(weather_row, 3, diameter, y, heights[0]);
+        layout_row(weather_row, weather_count, diameter, y, heights[0]);
         y += heights[0] + gap;
     }
     layout_row(time_row, 1, diameter, y, heights[1]);
@@ -648,18 +708,21 @@ static void render_clock(const projector_snapshot_t *s, const struct tm *local, 
         layout_row(wake_row, wake_count, diameter, y, heights[3]);
         y += heights[3] + gap;
     }
-    place_marquee(clock_ui.date, date, date_font, COLOR_TEXT, diameter, y, date_height);
+    show(clock_ui.date, date[0]);
+    if (date[0]) place_marquee(clock_ui.date, date, date_font, COLOR_TEXT, diameter, y, date_height);
 }
 
 /* ---- Home page: alarm, bedroom and outdoor temperature, open doors, lights. ---- */
 
-static void render_home(const projector_snapshot_t *s, int diameter)
+static void render_home(const projector_snapshot_t *s, const projector_page_t *page, int diameter)
 {
-    int level = size_level(diameter);
+    int level = projector_size_level(size_level(diameter), page->size);
     const lv_font_t *text_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
     const lv_font_t *row_icon = level >= 2 ? &bed_icons_12 : &bed_icons_14;
     const lv_font_t *temp_font = level == 0 ? &bed_font_bold_16 : &bed_font_bold_14;
     const lv_font_t *temp_icon = level == 0 ? &bed_icons_14 : &bed_icons_12;
+    int alarm_mode_shown = page->show[HOME_ALARM], temps_mode = page->show[HOME_TEMPERATURES];
+    int doors_mode = page->show[HOME_OPENINGS], lights_mode = page->show[HOME_LIGHTS];
 
     /* Rows hug the centre, where the circle is widest: alarm, temperatures,
      * open doors and windows, lights. */
@@ -667,13 +730,14 @@ static void render_home(const projector_snapshot_t *s, int diameter)
     int temp_height = ink_height(temp_icon) > ink_height(temp_font) ?
         ink_height(temp_icon) : ink_height(temp_font);
     int gap = level >= 2 ? 5 : 7;
-    int heights[4] = {row, temp_height, row, row};
+    int heights[4] = {alarm_mode_shown != LABELED_OFF ? row : 0, temps_mode != TEMPS_OFF ? temp_height : 0,
+                      doors_mode != NAMES_OFF ? row : 0, lights_mode != NAMES_OFF ? row : 0};
     int y = stack_top(diameter, heights, 4, gap);
 
     const alarm_mode_t *alarm = alarm_mode(s);
-    layout_icon_text(home_ui.alarm_icon, alarm->icon, alarm->color, row_icon, home_ui.alarm,
-                     alarm->label, alarm->color, text_font, diameter, y, row);
-    y += row + gap;
+    layout_labeled(alarm_mode_shown, home_ui.alarm_icon, alarm->icon, alarm->color, row_icon, home_ui.alarm,
+                   alarm->label, alarm->color, text_font, diameter, y, row);
+    if (heights[0]) y += row + gap;
 
     /* Bedroom left and outdoors right of a hairline, each an icon and a value. */
     const char *indoor = s->ha_fresh && s->ha.indoor[0] ? s->ha.indoor : "--\xC2\xB0";
@@ -688,13 +752,16 @@ static void render_home(const projector_snapshot_t *s, int diameter)
     };
     int half_gap = level >= 2 ? 4 : 5;
     /* Small circles lose the icons rather than clip a value. */
-    bool icons = true;
+    bool icons = temps_mode == TEMPS_ICONS;
     for (int i = 0; i < 2; ++i)
         if (half_gap + text_width(columns[i].glyph, temp_icon) + 2 +
             text_width(columns[i].text, temp_font) > circle_half_width(diameter, y, temp_height) + 2)
             icons = false; /* + 2: the half width already keeps 2 pixels off the edge. */
+    show(home_ui.divider, temps_mode != TEMPS_OFF);
     for (int i = 0; i < 2; ++i) {
         show(columns[i].icon, icons);
+        show(columns[i].value, temps_mode != TEMPS_OFF);
+        if (temps_mode == TEMPS_OFF) continue;
         int icon_width = icons ? text_width(columns[i].glyph, temp_icon) : -2;
         int value_width = text_width(columns[i].text, temp_font);
         int width = icon_width + 2 + value_width;
@@ -706,33 +773,45 @@ static void render_home(const projector_snapshot_t *s, int diameter)
         set_label(columns[i].value, columns[i].text, temp_font, icons ? COLOR_TEXT : columns[i].color);
         place_on_row(columns[i].value, temp_font, left + icon_width + 2, value_width, y, temp_height);
     }
-    set_area(home_ui.divider, diameter / 2, y - 2, 1, temp_height + 4);
-    show(home_ui.divider, true);
-    y += temp_height + gap;
+    if (temps_mode != TEMPS_OFF) {
+        set_area(home_ui.divider, diameter / 2, y - 2, 1, temp_height + 4);
+        y += temp_height + gap;
+    }
 
+    /* Names of what is open or on, or only how many. */
     char text[300];
-    if (!(s->ha_fresh && s->ha.openings_known))
+    show(home_ui.door_icon, doors_mode != NAMES_OFF);
+    show(home_ui.doors, doors_mode != NAMES_OFF);
+    if (doors_mode == NAMES_OFF) {
+        /* Hidden above. */
+    } else if (!(s->ha_fresh && s->ha.openings_known))
         layout_icon_text(home_ui.door_icon, BED_ICON_DOOR_OPEN, COLOR_DIM, row_icon, home_ui.doors,
                          "Aperture ?", COLOR_DIM, text_font, diameter, y, row);
     else if (!s->ha.openings)
         layout_icon_text(home_ui.door_icon, BED_ICON_DOOR_CLOSED, COLOR_OK, row_icon, home_ui.doors,
                          "Tutto chiuso", COLOR_MUTED, text_font, diameter, y, row);
     else {
-        join_names(text, sizeof(text), s->ha.opening_names, s->ha.opening_name_count, s->ha.openings,
+        int names = doors_mode == NAMES_ALL ? s->ha.opening_name_count : 0;
+        join_names(text, sizeof(text), s->ha.opening_names, names, s->ha.openings,
                    s->ha.openings == 1 ? "aperta" : "aperte");
         layout_icon_text(home_ui.door_icon, BED_ICON_DOOR_OPEN, COLOR_OPEN, row_icon, home_ui.doors,
                          text, COLOR_TEXT, text_font, diameter, y, row);
     }
-    y += row + gap;
+    if (heights[2]) y += row + gap;
 
-    if (!(s->ha_fresh && s->ha.lights_known))
+    show(home_ui.light_icon, lights_mode != NAMES_OFF);
+    show(home_ui.lights, lights_mode != NAMES_OFF);
+    if (lights_mode == NAMES_OFF) {
+        /* Hidden above. */
+    } else if (!(s->ha_fresh && s->ha.lights_known))
         layout_icon_text(home_ui.light_icon, BED_ICON_LIGHTBULB_OUTLINE, COLOR_DIM, row_icon,
                          home_ui.lights, "Luci ?", COLOR_DIM, text_font, diameter, y, row);
     else if (!s->ha.lights)
         layout_icon_text(home_ui.light_icon, BED_ICON_LIGHTBULB_OUTLINE, COLOR_MUTED, row_icon,
                          home_ui.lights, "Luci spente", COLOR_MUTED, text_font, diameter, y, row);
     else {
-        join_names(text, sizeof(text), s->ha.light_names, s->ha.light_name_count, s->ha.lights,
+        int names = lights_mode == NAMES_ALL ? s->ha.light_name_count : 0;
+        join_names(text, sizeof(text), s->ha.light_names, names, s->ha.lights,
                    s->ha.lights == 1 ? "accesa" : "accese");
         layout_icon_text(home_ui.light_icon, BED_ICON_LIGHTBULB_ON, COLOR_LIGHT, row_icon,
                          home_ui.lights, text, COLOR_TEXT, text_font, diameter, y, row);
@@ -774,52 +853,60 @@ static bool rainy(const projector_period_t *period)
     return period->condition[0] && period->precipitation >= 10;
 }
 
-static void render_weather(const projector_snapshot_t *s, const struct tm *local, bool valid_time,
-                           int diameter)
+static void render_weather(const projector_snapshot_t *s, const projector_page_t *page, const struct tm *local,
+                           bool valid_time, int diameter)
 {
-    int level = size_level(diameter);
+    int level = projector_size_level(size_level(diameter), page->size);
+    int now_mode = page->show[WEATHER_NOW], details_mode = page->show[WEATHER_DETAILS];
+    bool periods_shown = page->show[WEATHER_PERIODS] == SHOW_ON;
     const lv_font_t *small = &bed_font_text_10;
     const lv_font_t *text_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
 
     /* Now: condition icon and temperature, then a scrolling line of details. */
     weather_look_t look;
     bool now = s->ha_fresh && weather_look(s->ha.weather, false, &look);
-    char temperature[12], details[160];
+    char temperature[12];
     degrees(temperature, sizeof(temperature), s->ha_fresh && s->ha.temp_now_known, s->ha.temp_now);
-    row_item_t now_row[2] = {
+    row_item_t now_items[2] = {
         {weather_ui.icon, now ? look.icon : BED_ICON_HELP_CIRCLE_OUTLINE, icon_fonts,
          ARRAY_COUNT(icon_fonts), level, now ? look.color : COLOR_DIM, 0},
         {weather_ui.temperature, temperature, bold_fonts, ARRAY_COUNT(bold_fonts), level, COLOR_TEXT, 5},
     };
-    int used = snprintf(details, sizeof(details), "%s", now ? look.label : "Meteo ?");
-    if (s->ha_fresh && s->ha.feels[0] && used < (int)sizeof(details))
-        used += snprintf(details + used, sizeof(details) - used, "   " RECOLOR(HEX_MUTED, "%s %s"),
-                         BED_ICON_THERMOMETER, s->ha.feels);
-    if (s->ha_fresh && s->ha.humidity >= 0 && used < (int)sizeof(details))
-        used += snprintf(details + used, sizeof(details) - used, "   " RECOLOR(HEX_RAIN, "%s") " %d%%",
-                         BED_ICON_WATER_PERCENT, s->ha.humidity);
-    if (s->ha_fresh && s->ha.wind[0] && used < (int)sizeof(details))
-        snprintf(details + used, sizeof(details) - used, "   " RECOLOR("c8d0da", "%s") " %s",
-                 BED_ICON_WEATHER_WINDY, s->ha.wind);
+    /* Icon and temperature, the temperature alone or the icon alone. */
+    row_item_t *now_row = now_items + (now_mode == NOW_TEMP ? 1 : 0);
+    int now_count = now_mode == NOW_ICON_TEMP ? 2 : 1;
+    char details[160] = "";
+    int used = details_mode == DETAILS_OFF ? 0 :
+        snprintf(details, sizeof(details), "%s", now ? look.label : "Meteo ?");
+    bool full = details_mode == DETAILS_FULL;
+    if (full && s->ha_fresh && s->ha.feels[0] && used < (int)sizeof(details))
+        used += snprintf(details + used, sizeof(details) - used, "   #%s %s %s#",
+                         hex(COLOR_MUTED), BED_ICON_THERMOMETER, s->ha.feels);
+    if (full && s->ha_fresh && s->ha.humidity >= 0 && used < (int)sizeof(details))
+        used += snprintf(details + used, sizeof(details) - used, "   #%s %s# %d%%",
+                         hex(COLOR_RAIN), BED_ICON_WATER_PERCENT, s->ha.humidity);
+    if (full && s->ha_fresh && s->ha.wind[0] && used < (int)sizeof(details))
+        snprintf(details + used, sizeof(details) - used, "   #%s %s# %s",
+                 hex(COLOR_WIND), BED_ICON_WEATHER_WINDY, s->ha.wind);
 
-    /* The day ahead: today until 21:00, then tomorrow, titled inside the rule. */
-    bool tomorrow = valid_time && projector_shows_tomorrow(local->tm_hour);
+    /* The day ahead: today until tomorrow_from, then tomorrow, titled inside the rule. */
+    bool tomorrow = valid_time && projector_shows_tomorrow(local->tm_hour, page->tomorrow_from);
     const projector_day_t *day = forecast_day(s, local, valid_time, tomorrow ? 1 : 0);
     const char *title = tomorrow ? "DOMANI" : "OGGI";
     /* A name and a rain chance are too wide for half the circle, so the rain
      * chances lead the scrolling outlook instead. */
     char outlook[160] = "";
     int length = 0;
-    if (day && (rainy(&day->day) || rainy(&day->evening))) {
-        length = snprintf(outlook, sizeof(outlook), RECOLOR(HEX_RAIN, "%s"), BED_ICON_UMBRELLA);
+    if (page->show[WEATHER_RAIN] == SHOW_ON && day && (rainy(&day->day) || rainy(&day->evening))) {
+        length = snprintf(outlook, sizeof(outlook), "#%s %s#", hex(COLOR_RAIN), BED_ICON_UMBRELLA);
         if (rainy(&day->day))
-            length += snprintf(outlook + length, sizeof(outlook) - length, " Giorno " RECOLOR(HEX_RAIN, "%d%%"),
-                               day->day.precipitation);
+            length += snprintf(outlook + length, sizeof(outlook) - length, " Giorno #%s %d%%#",
+                               hex(COLOR_RAIN), day->day.precipitation);
         if (rainy(&day->evening) && length < (int)sizeof(outlook))
-            length += snprintf(outlook + length, sizeof(outlook) - length, " Sera " RECOLOR(HEX_RAIN, "%d%%"),
-                               day->evening.precipitation);
+            length += snprintf(outlook + length, sizeof(outlook) - length, " Sera #%s %d%%#",
+                               hex(COLOR_RAIN), day->evening.precipitation);
     }
-    if (day && day->summary[0] && length < (int)sizeof(outlook))
+    if (page->show[WEATHER_SUMMARY] == SHOW_ON && day && day->summary[0] && length < (int)sizeof(outlook))
         snprintf(outlook + length, sizeof(outlook) - length, "%s%s", length ? "   " : "", day->summary);
     const lv_font_t *period_icon = level >= 2 ? &bed_icons_18 : &bed_icons_22;
     const lv_font_t *period_temp = level >= 2 ? &bed_font_bold_14 : &bed_font_bold_16;
@@ -827,43 +914,59 @@ static void render_weather(const projector_snapshot_t *s, const struct tm *local
         ink_height(period_icon) : ink_height(period_temp);
     int periods = ink_height(small) + 4 + period_height;
 
-    int heights[5] = {row_height(now_row, 2), ink_height(text_font), ink_height(small), periods,
+    int heights[5] = {row_height(now_row, now_count), details[0] ? ink_height(text_font) : 0,
+                      periods_shown ? ink_height(small) : 0, periods_shown ? periods : 0,
                       outlook[0] ? ink_height(text_font) : 0};
     int gap = level >= 2 ? 4 : 5;
     int y = stack_top(diameter, heights, 5, gap);
-    layout_row(now_row, 2, diameter, y, heights[0]);
+    show(weather_ui.icon, false);
+    show(weather_ui.temperature, false);
+    layout_row(now_row, now_count, diameter, y, heights[0]);
     y += heights[0] + gap;
-    place_marquee(weather_ui.summary, details, text_font, COLOR_TEXT, diameter, y, heights[1]);
-    y += heights[1] + gap;
-    int title_width = text_width(title, small);
-    int rule = circle_half_width(diameter, y, heights[2]) * 2 * 3 / 4;
-    int rule_width = (rule - title_width) / 2 - 5;
-    set_label(weather_ui.title, title, small, COLOR_MUTED);
-    place_on_row(weather_ui.title, small, diameter / 2 - title_width / 2, title_width + 1, y, heights[2]);
-    set_area(weather_ui.rule_left, diameter / 2 - rule / 2, y + heights[2] / 2, rule_width, 1);
-    set_area(weather_ui.rule_right, diameter / 2 + rule / 2 - rule_width, y + heights[2] / 2, rule_width, 1);
-    show(weather_ui.rule_left, rule_width > 4);
-    show(weather_ui.rule_right, rule_width > 4);
-    y += heights[2] + gap;
-    int offset = diameter * 6 / 25;
-    const period_ui_t day_ui = {weather_ui.day_label, weather_ui.day_icon, weather_ui.day_temp};
-    const period_ui_t evening_ui = {weather_ui.evening_label, weather_ui.evening_icon,
-                                    weather_ui.evening_temp};
-    render_period(&day_ui, day ? &day->day : NULL, false, "Giorno", diameter / 2 - offset, y,
-                  period_height, period_icon, period_temp);
-    render_period(&evening_ui, day ? &day->evening : NULL, true, "Sera", diameter / 2 + offset, y,
-                  period_height, period_icon, period_temp);
-    y += heights[3] + gap;
+    show(weather_ui.summary, details[0]);
+    if (details[0]) {
+        place_marquee(weather_ui.summary, details, text_font, COLOR_TEXT, diameter, y, heights[1]);
+        y += heights[1] + gap;
+    }
+    lv_obj_t *const period_objects[] = {weather_ui.title, weather_ui.rule_left, weather_ui.rule_right,
+        weather_ui.day_label, weather_ui.day_icon, weather_ui.day_temp, weather_ui.evening_label,
+        weather_ui.evening_icon, weather_ui.evening_temp};
+    if (!periods_shown)
+        for (int i = 0; i < ARRAY_COUNT(period_objects); ++i) show(period_objects[i], false);
+    else {
+        int title_width = text_width(title, small);
+        int rule = circle_half_width(diameter, y, heights[2]) * 2 * 3 / 4;
+        int rule_width = (rule - title_width) / 2 - 5;
+        set_label(weather_ui.title, title, small, COLOR_MUTED);
+        place_on_row(weather_ui.title, small, diameter / 2 - title_width / 2, title_width + 1, y, heights[2]);
+        set_area(weather_ui.rule_left, diameter / 2 - rule / 2, y + heights[2] / 2, rule_width, 1);
+        set_area(weather_ui.rule_right, diameter / 2 + rule / 2 - rule_width, y + heights[2] / 2, rule_width, 1);
+        show(weather_ui.rule_left, rule_width > 4);
+        show(weather_ui.rule_right, rule_width > 4);
+        y += heights[2] + gap;
+        int offset = diameter * 6 / 25;
+        const period_ui_t day_ui = {weather_ui.day_label, weather_ui.day_icon, weather_ui.day_temp};
+        const period_ui_t evening_ui = {weather_ui.evening_label, weather_ui.evening_icon,
+                                        weather_ui.evening_temp};
+        render_period(&day_ui, day ? &day->day : NULL, false, "Giorno", diameter / 2 - offset, y,
+                      period_height, period_icon, period_temp);
+        render_period(&evening_ui, day ? &day->evening : NULL, true, "Sera", diameter / 2 + offset, y,
+                      period_height, period_icon, period_temp);
+        y += heights[3] + gap;
+    }
     show(weather_ui.outlook, outlook[0]);
     if (outlook[0]) place_marquee(weather_ui.outlook, outlook, text_font, COLOR_MUTED, diameter, y, heights[4]);
 }
 
 /* ---- Agenda page: next phone alarm, then the coming calendar events. ---- */
 
-static void render_agenda(const projector_snapshot_t *s, const struct tm *local, bool valid_time,
-                          int diameter)
+static void render_agenda(const projector_snapshot_t *s, const projector_page_t *page, const struct tm *local,
+                          bool valid_time, int diameter)
 {
-    int level = size_level(diameter);
+    int level = projector_size_level(size_level(diameter), page->size);
+    int wake_mode = page->show[AGENDA_WAKE];
+    int max_events = PROJECTOR_MAX_EVENTS - page->show[AGENDA_EVENTS]; /* EVENTS_3 to EVENTS_OFF. */
+    bool event_time = page->show[AGENDA_EVENT_TIME] == SHOW_ON;
     const lv_font_t *text_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
 
     /* An unusable alarm sensor must not read as "no alarm set". */
@@ -883,40 +986,54 @@ static void render_agenda(const projector_snapshot_t *s, const struct tm *local,
     char lines[PROJECTOR_MAX_EVENTS][96];
     uint32_t colors[PROJECTOR_MAX_EVENTS];
     int count = 0;
-    if (!s->ha_fresh || !s->ha.events_known) {
+    if (!max_events) {
+        /* No events on this page. */
+    } else if (!s->ha_fresh || !s->ha.events_known) {
         snprintf(lines[0], sizeof(lines[0]), "Eventi ?");
         colors[count++] = COLOR_DIM;
     } else if (!s->ha.event_count) {
         snprintf(lines[0], sizeof(lines[0]), "Nessun evento");
         colors[count++] = COLOR_MUTED;
     } else {
-        for (; count < s->ha.event_count; ++count) {
+        for (; count < s->ha.event_count && count < max_events; ++count) {
             char when[20];
             event_when(&s->ha.events[count], local, valid_time, when, sizeof(when));
-            snprintf(lines[count], sizeof(lines[count]), RECOLOR(HEX_MUTED, "%s") " %s", when,
-                     s->ha.events[count].title);
+            if (event_time)
+                snprintf(lines[count], sizeof(lines[count]), "#%s %s# %s", hex(COLOR_MUTED), when,
+                         s->ha.events[count].title);
+            else snprintf(lines[count], sizeof(lines[count]), "%s", s->ha.events[count].title);
             colors[count] = COLOR_TEXT;
         }
     }
 
     const lv_font_t *small = &bed_font_text_10;
-    int heights[3 + PROJECTOR_MAX_EVENTS] = {row_height(wake_row, 2), wake ? ink_height(small) : 0, 1};
+    /* The alarm, its day under it, then a rule over the events when both are shown. */
+    bool wake_shown = wake_mode != AGENDA_WAKE_OFF, day_shown = wake && wake_mode == AGENDA_WAKE_TIME_DAY;
+    bool divider = wake_shown && count;
+    int heights[3 + PROJECTOR_MAX_EVENTS] = {wake_shown ? row_height(wake_row, 2) : 0,
+                                             day_shown ? ink_height(small) : 0, divider ? 1 : 0};
     for (int i = 0; i < count; ++i) heights[3 + i] = ink_height(text_font);
     int gap = level >= 2 ? 5 : 7;
     int y = stack_top(diameter, heights, ARRAY_COUNT(heights), gap);
-    layout_row(wake_row, 2, diameter, y, heights[0]);
-    y += heights[0] + gap;
-    show(agenda_ui.wake_day, wake);
-    if (wake) {
+    show(agenda_ui.wake_icon, false);
+    show(agenda_ui.wake_time, false);
+    if (wake_shown) {
+        layout_row(wake_row, 2, diameter, y, heights[0]);
+        y += heights[0] + gap;
+    }
+    show(agenda_ui.wake_day, day_shown);
+    if (day_shown) {
         int width = text_width(day, small);
         set_label(agenda_ui.wake_day, day, small, COLOR_MUTED);
         place_on_row(agenda_ui.wake_day, small, diameter / 2 - width / 2, width + 1, y, heights[1]);
         y += heights[1] + gap;
     }
-    int rule = circle_half_width(diameter, y, 1);
-    set_area(agenda_ui.divider, diameter / 2 - rule / 2, y, rule, 1);
-    show(agenda_ui.divider, true);
-    y += 1 + gap;
+    show(agenda_ui.divider, divider);
+    if (divider) {
+        int rule = circle_half_width(diameter, y, 1);
+        set_area(agenda_ui.divider, diameter / 2 - rule / 2, y, rule, 1);
+        y += 1 + gap;
+    }
     for (int i = 0; i < PROJECTOR_MAX_EVENTS; ++i) {
         show(agenda_ui.events[i], i < count);
         if (i >= count) continue;
@@ -942,6 +1059,8 @@ typedef struct {
     int current;      /* Tick of the room temperature, or -1. */
     uint32_t accent;
     bool active;      /* Heating or cooling right now: full accent, otherwise dimmed. */
+    uint32_t tint;    /* The palette the dial was painted with. */
+    uint8_t palette;
 } dial_t;
 
 static uint32_t scale_color(uint32_t color, float factor)
@@ -1002,7 +1121,8 @@ static void draw_dial(const dial_t *d)
                 }
             const int samples = DIAL_SAMPLES * DIAL_SAMPLES;
             if (r || g || b)
-                lv_canvas_set_px(climate_ui.dial, px, py, lv_color_make(r / samples, g / samples, b / samples),
+                lv_canvas_set_px(climate_ui.dial, px, py,
+                                 lv_color_hex(paint((r / samples) << 16 | (g / samples) << 8 | b / samples)),
                                  LV_OPA_COVER);
         }
 }
@@ -1045,9 +1165,10 @@ static climate_status_t climate_status(const projector_thermostat_t *t, uint32_t
     return (climate_status_t){source, "?", COLOR_DIM, false};
 }
 
-static void render_climate(const projector_snapshot_t *s, int diameter)
+static void render_climate(const projector_snapshot_t *s, const projector_page_t *page, int diameter)
 {
-    int level = size_level(diameter);
+    int level = projector_size_level(size_level(diameter), page->size);
+    bool dial_shown = page->show[CLIMATE_DIAL] == SHOW_ON;
     const projector_thermostat_t *t = &s->ha.thermostat;
     bool known = s->ha_fresh && t->known;
     bool off = known && !strcmp(t->mode, "off");
@@ -1063,14 +1184,19 @@ static void render_climate(const projector_snapshot_t *s, int diameter)
     dial.target = dial.current = -1;
     dial.accent = accent;
     dial.active = status.active;
+    dial.palette = theme.palette;
+    dial.tint = theme.tint;
     if (target) dial.lit = dial.target = projector_dial_tick(t->target, t->min, t->max, DIAL_TICKS);
     if (current) dial.current = projector_dial_tick(t->current, t->min, t->max, DIAL_TICKS);
-    draw_dial(&dial);
-    set_area(climate_ui.dial, 0, 0, diameter, diameter);
+    show(climate_ui.dial, dial_shown);
+    if (dial_shown) {
+        draw_dial(&dial);
+        set_area(climate_ui.dial, 0, 0, diameter, diameter);
+    }
 
     /* Inside the ring: status, the set temperature (the room's when off), the room temperature
-     * or, when off, which appliance this is. */
-    int inset = diameter / 18 + 6;
+     * or, when off, which appliance this is. Without the ring the text takes the whole circle. */
+    int inset = dial_shown ? diameter / 18 + 6 : 4;
     int inner = diameter - 2 * inset;
     set_area(climate_ui.inner, inset, inset, inner, inner);
     const lv_font_t *text_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
@@ -1083,19 +1209,23 @@ static void render_climate(const projector_snapshot_t *s, int diameter)
         big_color = target ? COLOR_TEXT : COLOR_MUTED;
     }
     if (off) snprintf(details, sizeof(details), "%s", t->cooling ? "Condizionatore" : "Caloriferi");
-    else if (current) {
+    else if (current && page->show[CLIMATE_CURRENT] == SHOW_ON) {
         projector_format_tenths(t->current, value, sizeof(value));
-        snprintf(details, sizeof(details), RECOLOR(HEX_MUTED, "%s") " %s\xC2\xB0", BED_ICON_THERMOMETER, value);
+        snprintf(details, sizeof(details), "#%s %s# %s\xC2\xB0", hex(COLOR_MUTED),
+                 BED_ICON_THERMOMETER, value);
     }
     char label[48];
-    if (known && !off && t->preset[0]) snprintf(label, sizeof(label), "%s \xC2\xB7 %s", status.label, t->preset);
+    if (known && !off && t->preset[0] && page->show[CLIMATE_PRESET] == SHOW_ON)
+        snprintf(label, sizeof(label), "%s \xC2\xB7 %s", status.label, t->preset);
     else snprintf(label, sizeof(label), "%s", status.label);
     row_item_t target_row[1] = {{climate_ui.target, big, bold_fonts, ARRAY_COUNT(bold_fonts), level,
                                  big_color, 0}};
     int row = ink_height(status_icon) > ink_height(text_font) ? ink_height(status_icon) : ink_height(text_font);
     /* The room temperature keeps a font with inline icons for its thermometer. */
     const lv_font_t *details_font = &bed_font_text_12;
-    int heights[3] = {row, row_height(target_row, 1), details[0] ? ink_height(details_font) : 0};
+    int status_mode = page->show[CLIMATE_STATUS];
+    int heights[3] = {status_mode != LABELED_OFF ? row : 0, row_height(target_row, 1),
+                      details[0] ? ink_height(details_font) : 0};
     int gap = level >= 2 ? 4 : 5;
     /* The page dots sit in the gap of the ring, below this inner circle. */
     int reserve = bottom_reserve;
@@ -1103,14 +1233,14 @@ static void render_climate(const projector_snapshot_t *s, int diameter)
     int y = stack_top(inner, heights, 3, gap);
     bottom_reserve = reserve;
     /* Small circles drop the icon rather than scroll a short status. */
-    bool icon = text_width(status.icon, status_icon) + 4 + text_width(label, &bed_font_text_10) + 2 <=
-        circle_half_width(inner, y, row) * 2;
-    show(climate_ui.status_icon, icon);
-    if (icon)
-        layout_icon_text(climate_ui.status_icon, status.icon, status.color, status_icon, climate_ui.status, label,
-                         known ? COLOR_TEXT : COLOR_DIM, text_font, inner, y, row);
-    else place_marquee(climate_ui.status, label, text_font, status.color, inner, y, row);
-    y += heights[0] + gap;
+    if (status_mode == LABELED_ICON_LABEL &&
+        text_width(status.icon, status_icon) + 4 + text_width(label, &bed_font_text_10) + 2 >
+        circle_half_width(inner, y, row) * 2) status_mode = LABELED_LABEL;
+    /* Alone, the label takes the status colour. */
+    uint32_t label_color = status_mode == LABELED_LABEL ? status.color : known ? COLOR_TEXT : COLOR_DIM;
+    layout_labeled(status_mode, climate_ui.status_icon, status.icon, status.color, status_icon,
+                   climate_ui.status, label, label_color, text_font, inner, y, row);
+    if (heights[0]) y += heights[0] + gap;
     layout_row(target_row, 1, inner, y, heights[1]);
     y += heights[1] + gap;
     show(climate_ui.current, details[0]);
@@ -1119,12 +1249,13 @@ static void render_climate(const projector_snapshot_t *s, int diameter)
                       heights[2]);
 
     /* Humidity in the gap at the bottom of the ring, above the page dots. */
-    bool humidity = known && !off && t->humidity >= 0;
+    bool humidity = known && !off && t->humidity >= 0 && page->show[CLIMATE_HUMIDITY] == SHOW_ON;
     show(climate_ui.humidity, humidity);
     if (humidity) {
         const lv_font_t *small = &bed_font_text_12; /* The smallest font with inline icons. */
         char text[32];
-        snprintf(text, sizeof(text), RECOLOR(HEX_RAIN, "%s") "%d%%", BED_ICON_WATER_PERCENT, t->humidity);
+        snprintf(text, sizeof(text), "#%s %s#%d%%", hex(COLOR_RAIN), BED_ICON_WATER_PERCENT,
+                 t->humidity);
         int width = text_width(text, small), height = ink_height(small);
         int bottom = (bottom_reserve ? diameter - bottom_reserve : diameter - inset / 2) - 1;
         set_label(climate_ui.humidity, text, small, COLOR_MUTED);
@@ -1209,94 +1340,214 @@ static void render_dots(const projector_snapshot_t *s, bool visible, int diamete
 
 /* ---- Generic page of widget lines, also used for the access point screen. ---- */
 
-static void text_widget(const char *name, const projector_snapshot_t *s, const projector_page_t *page,
-                        const struct tm *local, bool valid_time, char *out, size_t size)
+/* A list line: label + value is the full line, value alone the short one; icon may be NULL. */
+typedef struct {
+    char label[24];
+    char value[64];
+    const char *icon;
+    uint32_t icon_color;
+} widget_text_t;
+
+static void text_widget(const projector_widget_t *widget, const projector_snapshot_t *s, const struct tm *local,
+                        bool valid_time, widget_text_t *out)
 {
-    if (!strcmp(name, "openings")) {
-        if (s->ha_fresh && s->ha.openings_known) snprintf(out, size, "Porte/finestre: %u", s->ha.openings);
-        else snprintf(out, size, "Porte/finestre: ?");
-    } else if (!strcmp(name, "alarm"))
-        snprintf(out, size, "Allarme: %s", alarm_mode(s)->label);
-    else if (!strcmp(name, "weather")) {
-        weather_look_t look;
-        if (weather_look(s->ha.weather, false, &look)) snprintf(out, size, "%s %s", look.label, s->ha.temperature);
-        else snprintf(out, size, "Meteo ?");
+    memset(out, 0, sizeof(*out));
+    char *label = out->label, *value = out->value;
+    size_t label_size = sizeof(out->label), size = sizeof(out->value);
+    switch (widget->type) {
+    case WIDGET_OPENINGS: {
+        bool known = s->ha_fresh && s->ha.openings_known;
+        snprintf(label, label_size, "Porte/finestre: ");
+        if (known) snprintf(value, size, "%u", s->ha.openings);
+        else snprintf(value, size, "?");
+        out->icon = known && !s->ha.openings ? BED_ICON_DOOR_CLOSED : BED_ICON_DOOR_OPEN;
+        out->icon_color = !known ? COLOR_DIM : s->ha.openings ? COLOR_OPEN : COLOR_OK;
+        break;
     }
-    else if (!strcmp(name, "date")) {
-        if (valid_time) snprintf(out, size, "%s %d %s", weekdays[local->tm_wday], local->tm_mday,
+    case WIDGET_ALARM: {
+        const alarm_mode_t *alarm = alarm_mode(s);
+        snprintf(label, label_size, "Allarme: ");
+        snprintf(value, size, "%s", alarm->label);
+        out->icon = alarm->icon;
+        out->icon_color = alarm->color;
+        break;
+    }
+    case WIDGET_WEATHER: {
+        weather_look_t look;
+        if (weather_look(s->ha.weather, false, &look)) {
+            snprintf(value, size, "%s %s", look.label, s->ha.temperature);
+            out->icon = look.icon;
+            out->icon_color = look.color;
+        } else {
+            snprintf(value, size, "Meteo ?");
+            out->icon = BED_ICON_HELP_CIRCLE_OUTLINE;
+            out->icon_color = COLOR_DIM;
+        }
+        break;
+    }
+    case WIDGET_DATE:
+        if (valid_time) snprintf(value, size, "%s %d %s", weekdays[local->tm_wday], local->tm_mday,
                                  months[local->tm_mon]);
-        else snprintf(out, size, "In attesa dell'ora");
-    } else if (!strcmp(name, "text")) snprintf(out, size, "%s", page->text);
-    else if (!strcmp(name, "indoor"))
-        snprintf(out, size, "Camera %s", s->ha_fresh && s->ha.indoor[0] ? s->ha.indoor : "?");
-    else if (!strcmp(name, "outdoor"))
-        snprintf(out, size, "Esterno %s", s->ha_fresh && s->ha.outdoor[0] ? s->ha.outdoor : "?");
-    else if (!strcmp(name, "lights")) {
-        if (s->ha_fresh && s->ha.lights_known) snprintf(out, size, "Luci accese: %u", s->ha.lights);
-        else snprintf(out, size, "Luci accese: ?");
-    } else if (!strcmp(name, "sun")) {
+        else snprintf(value, size, "In attesa dell'ora");
+        out->icon = BED_ICON_CALENDAR;
+        out->icon_color = COLOR_MUTED;
+        break;
+    case WIDGET_TEXT:
+        snprintf(value, size, "%s", widget->text);
+        break;
+    case WIDGET_INDOOR:
+        snprintf(label, label_size, "Camera ");
+        snprintf(value, size, "%s", s->ha_fresh && s->ha.indoor[0] ? s->ha.indoor : "?");
+        out->icon = BED_ICON_BED;
+        out->icon_color = 0xc8a8ff;
+        break;
+    case WIDGET_OUTDOOR:
+        snprintf(label, label_size, "Esterno ");
+        snprintf(value, size, "%s", s->ha_fresh && s->ha.outdoor[0] ? s->ha.outdoor : "?");
+        out->icon = BED_ICON_PINE_TREE;
+        out->icon_color = COLOR_OK;
+        break;
+    case WIDGET_LIGHTS: {
+        bool known = s->ha_fresh && s->ha.lights_known;
+        snprintf(label, label_size, "Luci accese: ");
+        if (known) snprintf(value, size, "%u", s->ha.lights);
+        else snprintf(value, size, "?");
+        out->icon = known && s->ha.lights ? BED_ICON_LIGHTBULB_ON : BED_ICON_LIGHTBULB_OUTLINE;
+        out->icon_color = !known ? COLOR_DIM : s->ha.lights ? COLOR_LIGHT : COLOR_MUTED;
+        break;
+    }
+    case WIDGET_SUN: {
         const projector_day_t *today = forecast_day(s, local, valid_time, 0);
-        if (today && today->sunrise[0] && today->sunset[0])
-            snprintf(out, size, "Alba %s \xC2\xB7 Tramonto %s", today->sunrise, today->sunset);
-        else snprintf(out, size, "Alba e tramonto ?");
-    } else if (!strcmp(name, "wake")) {
+        out->icon = BED_ICON_SUNRISE;
+        out->icon_color = COLOR_SUNRISE;
+        if (today && today->sunrise[0] && today->sunset[0]) {
+            snprintf(label, label_size, "Alba ");
+            snprintf(value, size, "%s \xC2\xB7 Tramonto %s", today->sunrise, today->sunset);
+        } else {
+            snprintf(label, label_size, "Alba e tramonto ");
+            snprintf(value, size, "?");
+        }
+        break;
+    }
+    case WIDGET_WAKE: {
         char day[12];
-        if (!s->ha_fresh || !s->ha.wake_known) snprintf(out, size, "Sveglia ?");
-        else if (!s->ha.wake_date[0]) snprintf(out, size, "Nessuna sveglia");
+        bool known = s->ha_fresh && s->ha.wake_known;
+        out->icon = known && s->ha.wake_date[0] ? BED_ICON_ALARM : BED_ICON_ALARM_OFF;
+        out->icon_color = !known ? COLOR_DIM : s->ha.wake_date[0] ? COLOR_WARM : COLOR_MUTED;
+        if (!known) {
+            snprintf(label, label_size, "Sveglia ");
+            snprintf(value, size, "?");
+        } else if (!s->ha.wake_date[0]) snprintf(value, size, "Nessuna sveglia");
         else {
             day_name(s->ha.wake_date, local, valid_time, day, sizeof(day));
             /* Lower-case "oggi"/"domani" read better mid-sentence. */
             if (!strcmp(day, "Oggi") || !strcmp(day, "Domani")) day[0] += 'a' - 'A';
-            snprintf(out, size, "Sveglia %s %s", day, s->ha.wake_time);
+            snprintf(label, label_size, "Sveglia ");
+            snprintf(value, size, "%s %s", day, s->ha.wake_time);
         }
-    } else if (!strcmp(name, "event")) {
+        break;
+    }
+    case WIDGET_EVENT: {
         char when[20];
-        if (!s->ha_fresh || !s->ha.events_known) snprintf(out, size, "Eventi ?");
-        else if (!s->ha.event_count) snprintf(out, size, "Nessun evento");
+        out->icon = BED_ICON_CALENDAR;
+        out->icon_color = COLOR_MUTED;
+        if (!s->ha_fresh || !s->ha.events_known) snprintf(value, size, "Eventi ?");
+        else if (!s->ha.event_count) snprintf(value, size, "Nessun evento");
         else {
             event_when(&s->ha.events[0], local, valid_time, when, sizeof(when));
-            snprintf(out, size, "%s %s", when, s->ha.events[0].title);
+            snprintf(value, size, "%s %s", when, s->ha.events[0].title);
         }
-    } else if (!strcmp(name, "thermostat")) {
+        break;
+    }
+    case WIDGET_THERMOSTAT: {
         const projector_thermostat_t *t = &s->ha.thermostat;
         char target[8], current[8];
-        if (!s->ha_fresh || !t->known) snprintf(out, size, "Termostato ?");
-        else if (!strcmp(t->mode, "off")) snprintf(out, size, "Termostato spento");
+        bool known = s->ha_fresh && t->known;
+        snprintf(label, label_size, "Termostato ");
+        out->icon = known && t->cooling ? BED_ICON_AIR_CONDITIONER : BED_ICON_RADIATOR;
+        out->icon_color = !known ? COLOR_DIM : t->cooling ? COLOR_COOL : COLOR_HEAT;
+        if (!known) snprintf(value, size, "?");
+        else if (!strcmp(t->mode, "off")) snprintf(value, size, "spento");
         else {
             if (t->target != PROJECTOR_UNKNOWN_TENTHS) projector_format_tenths(t->target, target, sizeof(target));
             else snprintf(target, sizeof(target), "?");
             if (t->current != PROJECTOR_UNKNOWN_TENTHS) projector_format_tenths(t->current, current, sizeof(current));
             else snprintf(current, sizeof(current), "?");
-            snprintf(out, size, "Termostato %s\xC2\xB0, camera %s\xC2\xB0", target, current);
+            snprintf(value, size, "%s\xC2\xB0, camera %s\xC2\xB0", target, current);
         }
-    } else if (!strcmp(name, "moon")) {
-        if (valid_time) snprintf(out, size, "%s", moon_phases[projector_moon_phase(local->tm_year + 1900,
-                                 local->tm_mon + 1, local->tm_mday)]);
-        else snprintf(out, size, "Luna ?");
+        break;
     }
-    else if (!strncmp(name, "entity", 6) && name[6] >= '1' && name[6] <= '4') {
-        int index = name[6] - '1';
-        snprintf(out, size, "%s", s->ha_fresh && s->ha.extras[index][0] ? s->ha.extras[index] : "Dato HA ?");
-    } else out[0] = 0;
+    case WIDGET_MOON:
+        if (valid_time) snprintf(value, size, "%s", moon_phases[projector_moon_phase(local->tm_year + 1900,
+                                 local->tm_mon + 1, local->tm_mday)]);
+        else snprintf(value, size, "Luna ?");
+        out->icon = BED_ICON_WEATHER_NIGHT;
+        out->icon_color = 0x9aa8ff;
+        break;
+    default: { /* WIDGET_ENTITY1-4 */
+        int index = widget->type - WIDGET_ENTITY1;
+        snprintf(value, size, "%s", s->ha_fresh && s->ha.extras[index][0] ? s->ha.extras[index] : "Dato HA ?");
+        break;
+    }
+    }
 }
 
-static void render_lines(const char *header, const char *const *lines, int count, int diameter)
+/* A header (NULL for none) over up to four lines, each with an optional icon before it. */
+static void render_lines(const char *header, const char *const *texts, const char *const *icons,
+                         const uint32_t *icon_colors, int count, int level, int diameter)
 {
-    const lv_font_t *font = size_level(diameter) >= 2 ? &bed_font_text_10 : &bed_font_text_12;
-    int heights[4] = {ink_height(&bed_font_text_10), 0, 0, 0};
-    for (int i = 0; i < count; ++i) heights[i + 1] = ink_height(font);
-    int gap = diameter >= 104 ? 12 : 9;
-    int y = stack_top(diameter, heights, 4, gap);
-    int width = text_width(header, &bed_font_text_10);
-    set_label(list_ui.header, header, &bed_font_text_10, COLOR_MUTED);
-    place_on_row(list_ui.header, &bed_font_text_10, diameter / 2 - width / 2, width, y, heights[0]);
-    y += heights[0] + gap;
-    for (int i = 0; i < 3; ++i) {
+    const lv_font_t *font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
+    const lv_font_t *icon_font = level >= 2 ? &bed_icons_12 : &bed_icons_14;
+    int heights[1 + PROJECTOR_MAX_WIDGETS] = {header ? ink_height(&bed_font_text_10) : 0};
+    for (int i = 0; i < count; ++i)
+        heights[i + 1] = icons && icons[i] && ink_height(icon_font) > ink_height(font) ?
+            ink_height(icon_font) : ink_height(font);
+    /* Four lines need tighter gaps to stay inside the circle. */
+    int gap = count > 3 ? (diameter >= 104 ? 7 : 5) : diameter >= 104 ? 12 : 9;
+    int y = stack_top(diameter, heights, 1 + PROJECTOR_MAX_WIDGETS, gap);
+    show(list_ui.header, header);
+    if (header) {
+        int width = text_width(header, &bed_font_text_10);
+        set_label(list_ui.header, header, &bed_font_text_10, COLOR_MUTED);
+        place_on_row(list_ui.header, &bed_font_text_10, diameter / 2 - width / 2, width, y, heights[0]);
+        y += heights[0] + gap;
+    }
+    for (int i = 0; i < PROJECTOR_MAX_WIDGETS; ++i) {
+        bool icon = i < count && icons && icons[i];
+        show(list_ui.icons[i], icon);
         show(list_ui.lines[i], i < count);
         if (i >= count) continue;
-        place_marquee(list_ui.lines[i], lines[i], font, COLOR_TEXT, diameter, y, heights[i + 1]);
+        if (icon)
+            layout_icon_text(list_ui.icons[i], icons[i], icon_colors[i], icon_font, list_ui.lines[i], texts[i],
+                             COLOR_TEXT, font, diameter, y, heights[i + 1]);
+        else place_marquee(list_ui.lines[i], texts[i], font, COLOR_TEXT, diameter, y, heights[i + 1]);
         y += heights[i + 1] + gap;
     }
+}
+
+static void render_list(const projector_snapshot_t *s, const projector_page_t *page, const struct tm *local,
+                        bool valid_time, int diameter)
+{
+    static widget_text_t widgets[PROJECTOR_MAX_WIDGETS];
+    char values[PROJECTOR_MAX_WIDGETS][96];
+    const char *texts[PROJECTOR_MAX_WIDGETS], *icons[PROJECTOR_MAX_WIDGETS];
+    uint32_t colors[PROJECTOR_MAX_WIDGETS];
+    for (int i = 0; i < page->widget_count; ++i) {
+        const projector_widget_t *widget = &page->widgets[i];
+        text_widget(widget, s, local, valid_time, &widgets[i]);
+        bool with_label = widget->style == STYLE_LABEL_VALUE;
+        /* Label and value fit: 23 + 63 bytes. */
+        snprintf(values[i], sizeof(values[i]), "%.23s%.63s", with_label ? widgets[i].label : "",
+                 widgets[i].value);
+        texts[i] = values[i];
+        icons[i] = widget->style == STYLE_ICON_VALUE ? widgets[i].icon : NULL;
+        colors[i] = widgets[i].icon_color;
+    }
+    char header[17];
+    snprintf(header, sizeof(header), "%s", page->name);
+    for (char *c = header; *c; ++c) if (*c >= 'a' && *c <= 'z') *c -= 'a' - 'A';
+    render_lines(page->show[LIST_HEADER] == SHOW_ON ? header : NULL, texts, icons, colors, page->widget_count,
+                 projector_size_level(size_level(diameter), page->size), diameter);
 }
 
 /* ---- Calibration overlay ---- */
@@ -1390,7 +1641,10 @@ void bed_ui_create(lv_obj_t *screen)
 
     list_ui.page = new_page();
     list_ui.header = new_label(list_ui.page, LV_LABEL_LONG_MODE_CLIP);
-    for (int i = 0; i < 3; ++i) list_ui.lines[i] = new_label(list_ui.page, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    for (int i = 0; i < PROJECTOR_MAX_WIDGETS; ++i) {
+        list_ui.icons[i] = new_label(list_ui.page, LV_LABEL_LONG_MODE_CLIP);
+        list_ui.lines[i] = new_label(list_ui.page, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    }
 
     message_ui.page = new_page();
     message_ui.icon = new_label(message_ui.page, LV_LABEL_LONG_MODE_CLIP);
@@ -1446,50 +1700,37 @@ void bed_ui_render(const projector_snapshot_t *s, time_t now, const char *ap_ssi
     struct tm local;
     localtime_r(&now, &local);
     bool valid_time = now > VALID_TIME;
+    theme = s->theme;
+    for (int i = 0; i < hairline_count; ++i) set_background(hairlines[i], COLOR_LINE);
     const projector_page_t *page = &s->pages[s->page_index];
     lv_obj_t *active = list_ui.page;
-    bool dots = !ap_ssid && !s->message.active && s->page_index > 0 && s->page_count > 1;
+    bool dots = s->theme.dots && !ap_ssid && !s->message.active && s->page_index > 0 && s->page_count > 1;
     bottom_reserve = dots ? diameter - dots_top(diameter) + 3 : 0;
     if (ap_ssid) {
         char password_a[9], password_b[9];
         snprintf(password_a, sizeof(password_a), "%.8s", ap_password);
         snprintf(password_b, sizeof(password_b), "%s", strlen(ap_password) > 8 ? ap_password + 8 : "");
         const char *lines[3] = {ap_ssid, password_a, password_b};
-        render_lines("WI-FI AP", lines, 3, diameter);
+        render_lines("WI-FI AP", lines, NULL, NULL, 3, size_level(diameter), diameter);
     } else if (s->message.active) {
         active = message_ui.page;
         render_message(&s->message, diameter);
-    } else if (!strcmp(page->layout, "clock")) {
+    } else if (page->layout == LAYOUT_CLOCK) {
         active = clock_ui.page;
-        render_clock(s, &local, valid_time, diameter);
-    } else if (!strcmp(page->layout, "home")) {
+        render_clock(s, page, &local, valid_time, diameter);
+    } else if (page->layout == LAYOUT_HOME) {
         active = home_ui.page;
-        render_home(s, diameter);
-    } else if (!strcmp(page->layout, "weather")) {
+        render_home(s, page, diameter);
+    } else if (page->layout == LAYOUT_WEATHER) {
         active = weather_ui.page;
-        render_weather(s, &local, valid_time, diameter);
-    } else if (!strcmp(page->layout, "agenda")) {
+        render_weather(s, page, &local, valid_time, diameter);
+    } else if (page->layout == LAYOUT_AGENDA) {
         active = agenda_ui.page;
-        render_agenda(s, &local, valid_time, diameter);
-    } else if (!strcmp(page->layout, "climate")) {
+        render_agenda(s, page, &local, valid_time, diameter);
+    } else if (page->layout == LAYOUT_CLIMATE) {
         active = climate_ui.page;
-        render_climate(s, diameter);
-    } else {
-        char values[3][64];
-        const char *lines[3];
-        int count = 0;
-        for (int i = 0; i < PROJECTOR_MAX_WIDGETS; ++i)
-            if (page->widgets[i][0]) {
-                text_widget(page->widgets[i], s, page, &local, valid_time, values[count],
-                            sizeof(values[count]));
-                lines[count] = values[count];
-                ++count;
-            }
-        char header[17];
-        snprintf(header, sizeof(header), "%s", page->name);
-        for (char *c = header; *c; ++c) if (*c >= 'a' && *c <= 'z') *c -= 'a' - 'A';
-        render_lines(header, lines, count, diameter);
-    }
+        render_climate(s, page, diameter);
+    } else render_list(s, page, &local, valid_time, diameter);
     lv_obj_t *const pages[] = {clock_ui.page, home_ui.page, weather_ui.page, agenda_ui.page, climate_ui.page,
         list_ui.page, message_ui.page};
     for (int i = 0; i < ARRAY_COUNT(pages); ++i) {

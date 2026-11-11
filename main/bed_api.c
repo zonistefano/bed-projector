@@ -155,7 +155,8 @@ static esp_err_t respond_and_restart(httpd_req_t *req)
 
 static cJSON *status_json(void)
 {
-    projector_snapshot_t snapshot;
+    /* Static: about 3 KB, and the server handles one request at a time. */
+    static projector_snapshot_t snapshot;
     projector_snapshot(&snapshot);
     const projector_ha_t *ha = &snapshot.ha;
     cJSON *root = cJSON_CreateObject();
@@ -165,7 +166,7 @@ static cJSON *status_json(void)
     cJSON_AddStringToObject(root, "page", snapshot.pages[snapshot.page_index].id);
     cJSON_AddNumberToObject(root, "page_index", snapshot.page_index);
     cJSON_AddNumberToObject(root, "page_timeout", snapshot.page_timeout);
-    cJSON_AddStringToObject(root, "wake_display", snapshot.wake_display);
+    cJSON_AddBoolToObject(root, "preview", snapshot.preview);
     cJSON_AddBoolToObject(root, "ha_fresh", snapshot.ha_fresh);
     if (ha->openings_known) cJSON_AddNumberToObject(root, "openings", ha->openings);
     else cJSON_AddNullToObject(root, "openings");
@@ -182,7 +183,7 @@ static cJSON *status_json(void)
 
 static cJSON *calibration_json(void)
 {
-    projector_snapshot_t snapshot;
+    static projector_snapshot_t snapshot; /* Static like in status_json(). */
     projector_snapshot(&snapshot);
     const projector_calibration_t *c = &snapshot.calibration;
     cJSON *root = cJSON_CreateObject();
@@ -315,6 +316,7 @@ esp_err_t bed_api_start(void)
     static const json_route_t status = {NULL, status_json};
     static const json_route_t pages_get = {NULL, projector_pages_json};
     static const json_route_t pages_put = {projector_set_pages, projector_pages_json};
+    static const json_route_t pages_preview = {projector_preview_pages, status_json};
     static const json_route_t display = {projector_set_command, status_json};
     static const json_route_t calibration_get = {NULL, calibration_json};
     static const json_route_t calibration_post = {projector_set_calibration, calibration_json};
@@ -334,6 +336,7 @@ esp_err_t bed_api_start(void)
         JSON("/api/status", HTTP_GET, status),
         JSON("/api/pages", HTTP_GET, pages_get),
         JSON("/api/pages", HTTP_PUT, pages_put),
+        JSON("/api/pages/preview", HTTP_POST, pages_preview),
         JSON("/api/display", HTTP_POST, display),
         JSON("/api/calibration", HTTP_GET, calibration_get),
         JSON("/api/calibration", HTTP_POST, calibration_post),

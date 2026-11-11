@@ -2,6 +2,7 @@
 #include "projector_logic.h"
 #include "bed_build_config.h"
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,14 +16,12 @@
 #define NS "bed_projector"
 #define HA_TTL_US (120LL * 1000000LL)
 #define MESSAGE_DURATION_DEFAULT 30 /* Seconds. */
+#define PREVIEW_US (120LL * 1000000LL) /* A forgotten trial from the web UI ends by itself. */
+#define PAGES_JSON_MAX 4000           /* nvs_set_str limit, terminator included. */
+#define DEFAULT_TINT 0xffb36b
 #define DEFAULT_TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
 #define ARRAY_COUNT(items) (sizeof(items) / sizeof((items)[0]))
 
-static const char *const layouts[] = {"clock", "home", "weather", "agenda", "climate", "list"};
-static const char *const widgets[] = {
-    "openings", "alarm", "date", "weather", "entity1", "entity2", "entity3", "entity4", "text",
-    "indoor", "outdoor", "lights", "sun", "wake", "event", "moon", "thermostat"
-};
 /* Names HA may pass as a message icon; bed_ui.c maps each to its glyph. */
 static const char *const message_icons[] = {
     "bell", "information", "alert", "washing-machine", "package-variant", "door-open",
@@ -33,8 +32,6 @@ static const char *const hvac_modes[] = {"off", "heat", "cool", "heat_cool", "au
 static const char *const hvac_actions[] = {
     "off", "heating", "cooling", "drying", "idle", "fan", "preheating", "defrosting"
 };
-/* What the clock page shows of the coming morning's wake alarm; stored as the index. */
-static const char *const wake_displays[] = {"none", "icon", "time", "countdown"};
 static const char *const alarm_states[] = {
     "disarmed", "armed_home", "armed_away", "armed_night", "armed_vacation",
     "armed_custom_bypass", "arming", "pending", "triggered", "unknown"
@@ -46,9 +43,20 @@ static int64_t ha_received_us;
 static int64_t page_selected_us;
 static int64_t message_shown_us;
 static int64_t message_duration_us;
+static int64_t preview_started_us;
 static char api_token[33];
 static char tz_value[128] = DEFAULT_TIMEZONE;
 static projector_calibration_t saved_calibration;
+
+/* Pages and theme as one document: what /api/pages reads and writes. */
+typedef struct {
+    projector_page_t pages[PROJECTOR_MAX_PAGES];
+    uint8_t count;
+    projector_theme_t theme;
+} look_t;
+
+/* The look stored in NVS; state differs from it only during a trial. */
+static look_t saved_look;
 
 /* ---- Validation helpers ---- */
 
@@ -81,6 +89,16 @@ static bool is_integer(const cJSON *item, int min, int max)
            item->valueint >= min && item->valueint <= max;
 }
 
+/* Optional display string: absent or null is empty, otherwise it must fit out. */
+static bool parse_text(const cJSON *item, char *out, size_t size)
+{
+    out[0] = 0;
+    if (!item || cJSON_IsNull(item)) return true;
+    if (!cJSON_IsString(item) || !valid_display_text(item->valuestring, size - 1)) return false;
+    strcpy(out, item->valuestring);
+    return true;
+}
+
 /* ---- Persistence ---- */
 
 typedef esp_err_t (*nvs_writer_t)(nvs_handle_t handle, const void *context);
@@ -103,8 +121,6 @@ static esp_err_t write_presentation(nvs_handle_t handle, const void *context)
     esp_err_t err = nvs_set_u8(handle, "proj_on", s->power ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, "proj_bri", s->brightness);
     if (err == ESP_OK) err = nvs_set_u16(handle, "proj_return", s->page_timeout);
-    for (uint8_t i = 0; err == ESP_OK && i < ARRAY_COUNT(wake_displays); ++i)
-        if (!strcmp(s->wake_display, wake_displays[i])) err = nvs_set_u8(handle, "proj_wake", i);
     return err;
 }
 
@@ -147,50 +163,87 @@ static void ha_unknown(projector_ha_t *ha)
     ha->thermostat.humidity = PROJECTOR_UNKNOWN_PERCENT;
 }
 
+static projector_page_t fixed_page(const char *id, const char *name, int layout)
+{
+    projector_page_t page = {.layout = layout, .tomorrow_from = PROJECTOR_TOMORROW_DEFAULT};
+    strcpy(page.id, id);
+    strcpy(page.name, name);
+    return page;
+}
+
 static void defaults(void)
 {
     memset(&state, 0, sizeof(state));
     state.power = true;
     state.brightness = 30;
     state.page_timeout = PROJECTOR_PAGE_TIMEOUT_DEFAULT;
-    strcpy(state.wake_display, "icon");
     state.calibration = (projector_calibration_t){.center_x=64, .center_y=64, .diameter=112};
-    state.page_count = 3;
-    /* clock, home and weather are fixed designs; only the list layout shows widgets. */
-    state.pages[0] = (projector_page_t){.id="clock", .name="Ora", .layout="clock"};
-    state.pages[1] = (projector_page_t){.id="home", .name="Casa", .layout="home"};
-    state.pages[2] = (projector_page_t){.id="weather", .name="Meteo", .layout="weather"};
+    memset(&saved_look, 0, sizeof(saved_look));
+    saved_look.count = 3;
+    saved_look.pages[0] = fixed_page("clock", "Ora", LAYOUT_CLOCK);
+    saved_look.pages[1] = fixed_page("home", "Casa", LAYOUT_HOME);
+    saved_look.pages[2] = fixed_page("weather", "Meteo", LAYOUT_WEATHER);
+    saved_look.theme = (projector_theme_t){.palette = PALETTE_COLOR, .tint = DEFAULT_TINT, .dots = true};
+    memcpy(state.pages, saved_look.pages, sizeof(state.pages));
+    state.page_count = saved_look.count;
+    state.theme = saved_look.theme;
     ha_unknown(&state.ha);
 }
 
-/* ---- Pages ---- */
+/* ---- Pages and theme ---- */
 
-/* Caller owns the state mutex. Return NULL on any allocation failure. */
-static cJSON *pages_json_locked(void)
+static bool add_string(cJSON *object, const char *key, const char *value)
+{
+    return cJSON_AddStringToObject(object, key, value) != NULL;
+}
+
+static bool page_json(const projector_page_t *page, cJSON *item)
+{
+    const projector_layout_t *layout = &projector_layouts[page->layout];
+    if (!add_string(item, "id", page->id) || !add_string(item, "name", page->name) ||
+        !add_string(item, "layout", layout->name) || !add_string(item, "size", projector_sizes[page->size]))
+        return false;
+    if ((page->layout == LAYOUT_CLOCK || page->layout == LAYOUT_WEATHER) &&
+        !cJSON_AddNumberToObject(item, "tomorrow_from", page->tomorrow_from)) return false;
+    cJSON *show = cJSON_AddObjectToObject(item, "show");
+    if (!show) return false;
+    for (int i = 0; i < layout->element_count; ++i)
+        if (!add_string(show, layout->elements[i].name, layout->elements[i].modes[page->show[i]])) return false;
+    if (page->layout != LAYOUT_LIST) return true;
+    cJSON *list = cJSON_AddArrayToObject(item, "widgets");
+    if (!list) return false;
+    for (int i = 0; i < page->widget_count; ++i) {
+        const projector_widget_t *widget = &page->widgets[i];
+        cJSON *entry = cJSON_CreateObject();
+        if (!entry || !cJSON_AddItemToArray(list, entry)) {
+            cJSON_Delete(entry);
+            return false;
+        }
+        if (!add_string(entry, "widget", projector_widgets[widget->type]) ||
+            !add_string(entry, "style", projector_styles[widget->style]) ||
+            (widget->type == WIDGET_TEXT && !add_string(entry, "text", widget->text))) return false;
+    }
+    return true;
+}
+
+/* NULL on any allocation failure. */
+static cJSON *look_json(const look_t *look)
 {
     cJSON *root = cJSON_CreateObject();
+    cJSON *theme = cJSON_AddObjectToObject(root, "theme");
     cJSON *pages = cJSON_AddArrayToObject(root, "pages");
-    if (!pages) goto no_memory;
-    for (unsigned i = 0; i < state.page_count; ++i) {
-        const projector_page_t *page = &state.pages[i];
+    char tint[8];
+    snprintf(tint, sizeof(tint), "#%06" PRIx32, look->theme.tint & 0xffffff);
+    if (!theme || !pages || !add_string(theme, "palette", projector_palettes[look->theme.palette]) ||
+        !add_string(theme, "tint", tint) || !cJSON_AddBoolToObject(theme, "dots", look->theme.dots))
+        goto no_memory;
+    for (unsigned i = 0; i < look->count; ++i) {
         cJSON *item = cJSON_CreateObject();
         if (!item || !cJSON_AddItemToArray(pages, item)) {
             cJSON_Delete(item);
             goto no_memory;
         }
-        cJSON *list = cJSON_AddArrayToObject(item, "widgets");
-        if (!cJSON_AddStringToObject(item, "id", page->id) ||
-            !cJSON_AddStringToObject(item, "name", page->name) ||
-            !cJSON_AddStringToObject(item, "layout", page->layout) ||
-            !cJSON_AddStringToObject(item, "text", page->text) || !list) goto no_memory;
-        for (unsigned j = 0; j < PROJECTOR_MAX_WIDGETS; ++j) {
-            if (!page->widgets[j][0]) continue;
-            cJSON *widget = cJSON_CreateString(page->widgets[j]);
-            if (!widget || !cJSON_AddItemToArray(list, widget)) {
-                cJSON_Delete(widget);
-                goto no_memory;
-            }
-        }
+        if (!page_json(&look->pages[i], item)) goto no_memory;
     }
     return root;
 no_memory:
@@ -198,83 +251,160 @@ no_memory:
     return NULL;
 }
 
-static esp_err_t save_pages_locked(void)
+/* Optional enumerated string: absent keeps *out. */
+static bool parse_choice(const cJSON *item, const char *const *names, int count, uint8_t *out)
 {
-    cJSON *root = pages_json_locked();
-    char *json = root ? cJSON_PrintUnformatted(root) : NULL;
-    cJSON_Delete(root);
-    if (!json) return ESP_ERR_NO_MEM;
-    esp_err_t err = nvs_save(write_pages, json);
-    cJSON_free(json);
-    return err;
+    if (!item) return true;
+    int index = cJSON_IsString(item) ? projector_name_index(item->valuestring, names, count) : -1;
+    if (index < 0) return false;
+    *out = index;
+    return true;
+}
+
+/* Element modes by name; elements left out keep their default. */
+static bool parse_show(const cJSON *item, projector_page_t *out)
+{
+    if (!item) return true;
+    if (!cJSON_IsObject(item)) return false;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, item) {
+        int element = projector_element_index(out->layout, entry->string);
+        int mode = cJSON_IsString(entry) ? projector_mode_index(out->layout, element, entry->valuestring) : -1;
+        if (mode < 0) return false;
+        out->show[element] = mode;
+    }
+    return true;
+}
+
+/* List lines: {"widget", "style", "text"}; only a list page has them. */
+static bool parse_widgets(const cJSON *item, projector_page_t *out)
+{
+    if (!item) return true;
+    if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > PROJECTOR_MAX_WIDGETS ||
+        (out->layout != LAYOUT_LIST && cJSON_GetArraySize(item))) return false;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, item) {
+        projector_widget_t *widget = &out->widgets[out->widget_count++];
+        const cJSON *type = cJSON_GetObjectItemCaseSensitive(entry, "widget");
+        const cJSON *text = cJSON_GetObjectItemCaseSensitive(entry, "text");
+        if (!cJSON_IsObject(entry) || !type ||
+            !parse_choice(type, projector_widgets, WIDGET_COUNT, &widget->type) ||
+            !parse_choice(cJSON_GetObjectItemCaseSensitive(entry, "style"), projector_styles, STYLE_COUNT,
+                          &widget->style) ||
+            !parse_text(text, widget->text, sizeof(widget->text))) return false;
+        if (widget->type != WIDGET_TEXT) widget->text[0] = 0;
+    }
+    return true;
 }
 
 static bool parse_page(const cJSON *item, int index, const projector_page_t *previous,
                        projector_page_t *out)
 {
-    const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
-    const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
-    const cJSON *layout = cJSON_GetObjectItemCaseSensitive(item, "layout");
-    const cJSON *list = cJSON_GetObjectItemCaseSensitive(item, "widgets");
-    const cJSON *text = cJSON_GetObjectItemCaseSensitive(item, "text");
-    if (!cJSON_IsString(id) || !valid_name(id->valuestring, sizeof(out->id) - 1, true) ||
+#define FIELD(name) cJSON_GetObjectItemCaseSensitive(item, name)
+    const cJSON *id = FIELD("id"), *name = FIELD("name"), *layout = FIELD("layout");
+    const cJSON *tomorrow = FIELD("tomorrow_from");
+    memset(out, 0, sizeof(*out));
+    out->tomorrow_from = PROJECTOR_TOMORROW_DEFAULT;
+    int layout_index = cJSON_IsString(layout) ? projector_layout_index(layout->valuestring) : -1;
+    if (!cJSON_IsObject(item) ||
+        !cJSON_IsString(id) || !valid_name(id->valuestring, sizeof(out->id) - 1, true) ||
         !cJSON_IsString(name) || !valid_name(name->valuestring, sizeof(out->name) - 1, false) ||
-        !cJSON_IsString(layout) || !in_list(layout->valuestring, layouts, ARRAY_COUNT(layouts)) ||
-        !cJSON_IsArray(list) || cJSON_GetArraySize(list) > PROJECTOR_MAX_WIDGETS ||
-        (text && (!cJSON_IsString(text) ||
-                  !valid_display_text(text->valuestring, sizeof(out->text) - 1)))) return false;
+        layout_index < 0 || (tomorrow && !is_integer(tomorrow, 0, PROJECTOR_TOMORROW_NEVER))) return false;
+    out->layout = layout_index;
+    if (tomorrow) out->tomorrow_from = tomorrow->valueint;
+    if (!parse_choice(FIELD("size"), projector_sizes, SIZE_COUNT, &out->size) ||
+        !parse_show(FIELD("show"), out) || !parse_widgets(FIELD("widgets"), out)) return false;
+#undef FIELD
     /* The clock is always the first page and only the first. */
-    bool clock = !strcmp(id->valuestring, "clock") || !strcmp(layout->valuestring, "clock");
-    bool first_is_clock = !strcmp(id->valuestring, "clock") && !strcmp(layout->valuestring, "clock");
+    bool clock = !strcmp(id->valuestring, "clock") || layout_index == LAYOUT_CLOCK;
+    bool first_is_clock = !strcmp(id->valuestring, "clock") && layout_index == LAYOUT_CLOCK;
     if (index == 0 ? !first_is_clock : clock) return false;
     for (int i = 0; i < index; ++i)
         if (!strcmp(previous[i].id, id->valuestring)) return false;
-    int slot = 0;
-    const cJSON *widget;
-    cJSON_ArrayForEach(widget, list) {
-        if (!cJSON_IsString(widget) || !in_list(widget->valuestring, widgets, ARRAY_COUNT(widgets)))
-            return false;
-        strcpy(out->widgets[slot++], widget->valuestring);
-    }
     strcpy(out->id, id->valuestring);
     strcpy(out->name, name->valuestring);
-    strcpy(out->layout, layout->valuestring);
-    if (text) strcpy(out->text, text->valuestring);
     return true;
 }
 
-static esp_err_t parse_pages(const cJSON *root, projector_page_t *parsed, uint8_t *count,
-                             char *error, size_t error_size)
+/* Optional theme: absent fields keep the defaults. */
+static bool parse_theme(const cJSON *item, projector_theme_t *out)
+{
+    *out = (projector_theme_t){.palette = PALETTE_COLOR, .tint = DEFAULT_TINT, .dots = true};
+    if (!item) return true;
+    const cJSON *tint = cJSON_GetObjectItemCaseSensitive(item, "tint");
+    const cJSON *dots = cJSON_GetObjectItemCaseSensitive(item, "dots");
+    if (!cJSON_IsObject(item) ||
+        !parse_choice(cJSON_GetObjectItemCaseSensitive(item, "palette"), projector_palettes, PALETTE_COUNT,
+                      &out->palette) ||
+        (dots && !cJSON_IsBool(dots))) return false;
+    if (dots) out->dots = cJSON_IsTrue(dots);
+    if (!tint) return true;
+    const char *hex = cJSON_IsString(tint) ? tint->valuestring : "";
+    if (strlen(hex) != 7 || hex[0] != '#' || strspn(hex + 1, "0123456789abcdefABCDEF") != 6) return false;
+    out->tint = (uint32_t)strtoul(hex + 1, NULL, 16);
+    return true;
+}
+
+static esp_err_t parse_look(const cJSON *root, look_t *out, char *error, size_t error_size)
 {
     const cJSON *pages = cJSON_GetObjectItemCaseSensitive(root, "pages");
     int length = cJSON_IsArray(pages) ? cJSON_GetArraySize(pages) : 0;
-    memset(parsed, 0, sizeof(projector_page_t) * PROJECTOR_MAX_PAGES);
-    bool valid = length >= 1 && length <= PROJECTOR_MAX_PAGES;
+    memset(out, 0, sizeof(*out));
+    bool valid = length >= 1 && length <= PROJECTOR_MAX_PAGES &&
+        parse_theme(cJSON_GetObjectItemCaseSensitive(root, "theme"), &out->theme);
     for (int i = 0; valid && i < length; ++i)
-        valid = parse_page(cJSON_GetArrayItem(pages, i), i, parsed, &parsed[i]);
+        valid = parse_page(cJSON_GetArrayItem(pages, i), i, out->pages, &out->pages[i]);
     if (!valid) {
-        snprintf(error, error_size, "Invalid pages: 1-%d pages with unique ids and 1-16 character "
-                 "names, clock first, up to %d known widgets", PROJECTOR_MAX_PAGES,
-                 PROJECTOR_MAX_WIDGETS);
+        snprintf(error, error_size, "Invalid pages: 1-%d pages with unique ids and 1-16 character names, "
+                 "clock first, known layouts, elements and modes, up to %d widgets on list pages, "
+                 "valid theme", PROJECTOR_MAX_PAGES, PROJECTOR_MAX_WIDGETS);
         return ESP_ERR_INVALID_ARG;
     }
-    *count = (uint8_t)length;
+    out->count = (uint8_t)length;
     return ESP_OK;
+}
+
+static esp_err_t save_look(const look_t *look, char *error, size_t error_size)
+{
+    cJSON *root = look_json(look);
+    char *json = root ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    esp_err_t err = !json ? ESP_ERR_NO_MEM : strlen(json) + 1 > PAGES_JSON_MAX ? ESP_ERR_INVALID_SIZE :
+        nvs_save(write_pages, json);
+    cJSON_free(json);
+    if (err != ESP_OK) snprintf(error, error_size, err == ESP_ERR_INVALID_SIZE ? "Pages too large to save" :
+                                "Saving pages failed");
+    return err;
+}
+
+/* Show look; stay on the current page when it still exists, unless show_id names another.
+ * Caller owns the state mutex. */
+static void apply_look_locked(const look_t *look, const char *show_id)
+{
+    char current_id[sizeof(state.pages[0].id)];
+    strcpy(current_id, show_id ? show_id : state.pages[state.page_index].id);
+    memcpy(state.pages, look->pages, sizeof(state.pages));
+    state.page_count = look->count;
+    state.theme = look->theme;
+    unsigned previous_index = state.page_index;
+    state.page_index = 0;
+    for (unsigned i = 0; i < look->count; ++i)
+        if (!strcmp(current_id, state.pages[i].id)) state.page_index = i;
+    if (show_id || state.page_index != previous_index) page_selected_us = esp_timer_get_time();
 }
 
 static void load_pages(nvs_handle_t handle)
 {
     size_t size = 0;
-    if (nvs_get_str(handle, "proj_pages", NULL, &size) != ESP_OK || size > 2048) return;
+    if (nvs_get_str(handle, "proj_pages", NULL, &size) != ESP_OK || size > PAGES_JSON_MAX) return;
     char *json = malloc(size);
     if (json && nvs_get_str(handle, "proj_pages", json, &size) == ESP_OK) {
         cJSON *root = cJSON_Parse(json);
-        projector_page_t parsed[PROJECTOR_MAX_PAGES];
-        uint8_t count;
-        char error[160];
-        if (root && parse_pages(root, parsed, &count, error, sizeof(error)) == ESP_OK) {
-            memcpy(state.pages, parsed, sizeof(parsed));
-            state.page_count = count;
+        static look_t parsed;
+        char error[200];
+        if (root && parse_look(root, &parsed, error, sizeof(error)) == ESP_OK) {
+            saved_look = parsed;
+            apply_look_locked(&saved_look, NULL);
         }
         cJSON_Delete(root);
     }
@@ -328,8 +458,6 @@ static void load_presentation(nvs_handle_t handle)
     if (nvs_get_u8(handle, "proj_on", &value) == ESP_OK) state.power = value != 0;
     if (nvs_get_u16(handle, "proj_return", &timeout) == ESP_OK && projector_page_timeout_valid(timeout))
         state.page_timeout = timeout;
-    if (nvs_get_u8(handle, "proj_wake", &value) == ESP_OK && value < ARRAY_COUNT(wake_displays))
-        strcpy(state.wake_display, wake_displays[value]);
     uint8_t geometry[3];
     size_t size = sizeof(geometry);
     if (nvs_get_blob(handle, "proj_circle", geometry, &size) == ESP_OK && size == sizeof(geometry) &&
@@ -379,9 +507,14 @@ void projector_snapshot(projector_snapshot_t *out)
 void projector_tick(void)
 {
     xSemaphoreTake(lock, portMAX_DELAY);
-    if (projector_page_timed_out(state.page_index, page_selected_us,
-                                 esp_timer_get_time(), state.page_timeout * 1000000LL))
+    /* A trial keeps its page until it ends. */
+    if (!state.preview && projector_page_timed_out(state.page_index, page_selected_us,
+                                                   esp_timer_get_time(), state.page_timeout * 1000000LL))
         state.page_index = 0;
+    if (state.preview && projector_expired(preview_started_us, esp_timer_get_time(), PREVIEW_US)) {
+        state.preview = false;
+        apply_look_locked(&saved_look, NULL);
+    }
     if (state.message.active &&
         projector_expired(message_shown_us, esp_timer_get_time(), message_duration_us))
         memset(&state.message, 0, sizeof(state.message));
@@ -390,38 +523,62 @@ void projector_tick(void)
 
 esp_err_t projector_set_pages(const cJSON *root, char *error, size_t error_size)
 {
-    projector_page_t parsed[PROJECTOR_MAX_PAGES];
-    uint8_t count;
-    esp_err_t err = parse_pages(root, parsed, &count, error, error_size);
+    /* Static: about 1 KB, and HTTP requests are serialized. */
+    static look_t parsed;
+    esp_err_t err = parse_look(root, &parsed, error, error_size);
     if (err != ESP_OK) return err;
     xSemaphoreTake(lock, portMAX_DELAY);
-    projector_snapshot_t previous = state;
-    int64_t previous_selected_us = page_selected_us;
-    /* Stay on the shown page when it still exists. */
-    char current_id[sizeof(state.pages[0].id)];
-    strcpy(current_id, state.pages[state.page_index].id);
-    memcpy(state.pages, parsed, sizeof(parsed));
-    state.page_count = count;
-    state.page_index = 0;
-    for (unsigned i = 0; i < count; ++i)
-        if (!strcmp(current_id, state.pages[i].id)) state.page_index = i;
-    page_selected_us = esp_timer_get_time();
-    err = save_pages_locked();
-    if (err != ESP_OK) {
-        memcpy(state.pages, previous.pages, sizeof(state.pages));
-        state.page_count = previous.page_count;
-        state.page_index = previous.page_index;
-        page_selected_us = previous_selected_us;
-        snprintf(error, error_size, "Saving pages failed");
+    err = save_look(&parsed, error, error_size);
+    if (err == ESP_OK) {
+        saved_look = parsed;
+        state.preview = false;
+        apply_look_locked(&saved_look, NULL);
     }
     xSemaphoreGive(lock);
     return err;
 }
 
+/* Show a draft without saving it: {"cancel": true} or the /api/pages document with an optional
+ * "page" id to show. It ends on save, on cancel or after PREVIEW_US. */
+esp_err_t projector_preview_pages(const cJSON *root, char *error, size_t error_size)
+{
+    static look_t parsed;
+    const cJSON *cancel = cJSON_GetObjectItemCaseSensitive(root, "cancel");
+    const cJSON *page = cJSON_GetObjectItemCaseSensitive(root, "page");
+    if (cancel) {
+        if (!cJSON_IsTrue(cancel) || cJSON_GetArraySize(root) != 1) {
+            snprintf(error, error_size, "Invalid preview: cancel alone or a pages document");
+            return ESP_ERR_INVALID_ARG;
+        }
+        xSemaphoreTake(lock, portMAX_DELAY);
+        if (state.preview) {
+            state.preview = false;
+            apply_look_locked(&saved_look, NULL);
+        }
+        xSemaphoreGive(lock);
+        return ESP_OK;
+    }
+    esp_err_t err = parse_look(root, &parsed, error, error_size);
+    if (err != ESP_OK) return err;
+    int shown = -1;
+    for (unsigned i = 0; page && cJSON_IsString(page) && i < parsed.count; ++i)
+        if (!strcmp(page->valuestring, parsed.pages[i].id)) shown = i;
+    if (page && shown < 0) {
+        snprintf(error, error_size, "Unknown page");
+        return ESP_ERR_INVALID_ARG;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    apply_look_locked(&parsed, page ? page->valuestring : NULL);
+    state.preview = true;
+    preview_started_us = esp_timer_get_time();
+    xSemaphoreGive(lock);
+    return ESP_OK;
+}
+
 cJSON *projector_pages_json(void)
 {
     xSemaphoreTake(lock, portMAX_DELAY);
-    cJSON *root = pages_json_locked();
+    cJSON *root = look_json(&saved_look);
     xSemaphoreGive(lock);
     return root;
 }
@@ -433,15 +590,12 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     const cJSON *page = cJSON_GetObjectItemCaseSensitive(root, "page");
     const cJSON *move = cJSON_GetObjectItemCaseSensitive(root, "move");
     const cJSON *timeout = cJSON_GetObjectItemCaseSensitive(root, "page_timeout");
-    const cJSON *wake = cJSON_GetObjectItemCaseSensitive(root, "wake_display");
     bool valid_move = !move || (cJSON_IsString(move) &&
         (!strcmp(move->valuestring, "next") || !strcmp(move->valuestring, "previous")));
     if ((power && !cJSON_IsBool(power)) || (brightness && !is_integer(brightness, 1, 100)) ||
         (page && !cJSON_IsString(page)) || !valid_move ||
         (timeout && (!is_integer(timeout, 0, 65535) || !projector_page_timeout_valid(timeout->valueint))) ||
-        (wake && (!cJSON_IsString(wake) ||
-                  !in_list(wake->valuestring, wake_displays, ARRAY_COUNT(wake_displays)))) ||
-        (page && move) || (!power && !brightness && !page && !move && !timeout && !wake)) {
+        (page && move) || (!power && !brightness && !page && !move && !timeout)) {
         snprintf(error, error_size, "Invalid command");
         return ESP_ERR_INVALID_ARG;
     }
@@ -455,18 +609,18 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
         next_page = projector_move_page(state.page_index, state.page_count,
                                         !strcmp(move->valuestring, "next"));
     }
-    projector_snapshot_t next = state;
+    /* Static: the snapshot is too large for the HTTP task stack; requests are serialized. */
+    static projector_snapshot_t next;
+    next = state;
     if (power) next.power = cJSON_IsTrue(power);
     if (brightness) next.brightness = brightness->valueint;
     if (timeout) next.page_timeout = timeout->valueint;
-    if (wake) strcpy(next.wake_display, wake->valuestring);
     esp_err_t err = ESP_OK;
     if (next_page < 0) {
         err = ESP_ERR_INVALID_ARG;
         snprintf(error, error_size, "Unknown page");
     } else if (next.power != state.power || next.brightness != state.brightness ||
-               next.page_timeout != state.page_timeout ||
-               strcmp(next.wake_display, state.wake_display)) {
+               next.page_timeout != state.page_timeout) {
         err = nvs_save(write_presentation, &next);
         if (err != ESP_OK) snprintf(error, error_size, "NVS write failed");
     }
@@ -474,7 +628,6 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
         state.power = next.power;
         state.brightness = next.brightness;
         state.page_timeout = next.page_timeout;
-        strcpy(state.wake_display, next.wake_display);
         state.page_index = next_page;
         if (page || move) page_selected_us = esp_timer_get_time();
     }
@@ -492,16 +645,6 @@ static bool parse_degrees(const cJSON *item, bool *known, int16_t *value)
     if (!is_integer(item, -99, 199)) return false;
     *known = true;
     *value = item->valueint;
-    return true;
-}
-
-/* Optional display string: absent or null is empty, otherwise it must fit out. */
-static bool parse_text(const cJSON *item, char *out, size_t size)
-{
-    out[0] = 0;
-    if (!item || cJSON_IsNull(item)) return true;
-    if (!cJSON_IsString(item) || !valid_display_text(item->valuestring, size - 1)) return false;
-    strcpy(out, item->valuestring);
     return true;
 }
 

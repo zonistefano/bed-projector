@@ -79,14 +79,15 @@ static void sample(projector_snapshot_t *s, bool busy)
 {
     memset(s, 0, sizeof(*s));
     s->power = true;
-    snprintf(s->wake_display, sizeof(s->wake_display), "icon");
+    s->theme = (projector_theme_t){.palette=PALETTE_COLOR, .tint=0xffb36b, .dots=true};
     s->page_count = 5;
-    s->pages[0] = (projector_page_t){.id="clock", .name="Ora", .layout="clock"};
-    s->pages[1] = (projector_page_t){.id="home", .name="Casa", .layout="home"};
-    s->pages[2] = (projector_page_t){.id="weather", .name="Meteo", .layout="weather"};
-    s->pages[3] = (projector_page_t){.id="agenda", .name="Agenda", .layout="agenda"};
-    s->pages[4] = (projector_page_t){.id="page1", .name="Elenco", .layout="list",
-                                     .widgets={"weather", "alarm", "entity1"}};
+    s->pages[0] = (projector_page_t){.id="clock", .name="Ora", .layout=LAYOUT_CLOCK};
+    s->pages[1] = (projector_page_t){.id="home", .name="Casa", .layout=LAYOUT_HOME};
+    s->pages[2] = (projector_page_t){.id="weather", .name="Meteo", .layout=LAYOUT_WEATHER};
+    s->pages[3] = (projector_page_t){.id="agenda", .name="Agenda", .layout=LAYOUT_AGENDA};
+    s->pages[4] = (projector_page_t){.id="page1", .name="Elenco", .layout=LAYOUT_LIST, .widget_count=3,
+        .widgets={{.type=WIDGET_WEATHER}, {.type=WIDGET_ALARM}, {.type=WIDGET_ENTITY1}}};
+    for (int i = 0; i < s->page_count; ++i) s->pages[i].tomorrow_from = PROJECTOR_TOMORROW_DEFAULT;
     s->ha_fresh = true;
     s->ha.openings_known = true;
     s->ha.lights_known = true;
@@ -126,6 +127,109 @@ static void sample(projector_snapshot_t *s, bool busy)
         "cloudy", 19, 30, "rainy", 14, 70);
 }
 
+/* ---- Scenario settings, applied after sample() ---- */
+
+static void list_widgets(projector_snapshot_t *s, const int *types, int style, int count)
+{
+    projector_page_t *page = &s->pages[4];
+    page->widget_count = count;
+    for (int i = 0; i < count; ++i) page->widgets[i] = (projector_widget_t){.type=types[i], .style=style};
+}
+
+static void wake_time(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_TIME; }
+static void wake_countdown(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_COUNTDOWN; }
+static void wake_none(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_OFF; }
+static void list_rooms(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_INDOOR, WIDGET_OUTDOOR, WIDGET_SUN}, STYLE_LABEL_VALUE, 3);
+}
+static void list_agenda(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_WAKE, WIDGET_EVENT, WIDGET_MOON}, STYLE_LABEL_VALUE, 3);
+}
+static void list_agenda_quiet(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_WAKE, WIDGET_EVENT, WIDGET_LIGHTS}, STYLE_LABEL_VALUE, 3);
+}
+static void list_thermostat(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_THERMOSTAT, WIDGET_INDOOR, WIDGET_OUTDOOR}, STYLE_LABEL_VALUE, 3);
+}
+static void list_icons(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_INDOOR, WIDGET_OUTDOOR, WIDGET_LIGHTS, WIDGET_WAKE},
+                 STYLE_ICON_VALUE, 4);
+}
+static void list_values(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_OPENINGS, WIDGET_LIGHTS, WIDGET_ALARM, WIDGET_TEXT}, STYLE_VALUE, 4);
+    snprintf(s->pages[4].widgets[3].text, sizeof(s->pages[4].widgets[3].text), "Buonanotte");
+    s->pages[4].show[LIST_HEADER] = SHOW_OFF;
+}
+static void theme_red(projector_snapshot_t *s) { s->theme.palette = PALETTE_RED; }
+static void theme_mono(projector_snapshot_t *s)
+{
+    s->theme.palette = PALETTE_MONO;
+    s->theme.tint = 0x7db8ff;
+}
+static void large(projector_snapshot_t *s)
+{
+    for (int i = 0; i < s->page_count; ++i) s->pages[i].size = SIZE_LARGE;
+}
+static void small(projector_snapshot_t *s)
+{
+    for (int i = 0; i < s->page_count; ++i) s->pages[i].size = SIZE_SMALL;
+}
+static void clock_minimal(projector_snapshot_t *s)
+{
+    uint8_t *show = s->pages[0].show;
+    show[CLOCK_FORECAST] = FORECAST_OFF;
+    show[CLOCK_OPENINGS] = show[CLOCK_LIGHTS] = STATUS_OFF;
+    show[CLOCK_ALARM] = SHOW_OFF;
+    show[CLOCK_WAKE] = WAKE_OFF;
+    show[CLOCK_DATE] = DATE_SHORT;
+    show[CLOCK_SUN] = SHOW_OFF;
+}
+static void clock_icons(projector_snapshot_t *s)
+{
+    uint8_t *show = s->pages[0].show;
+    show[CLOCK_FORECAST] = FORECAST_TEMPS;
+    show[CLOCK_OPENINGS] = show[CLOCK_LIGHTS] = STATUS_ICON;
+    show[CLOCK_DATE] = DATE_OFF;
+}
+static void home_counts(projector_snapshot_t *s)
+{
+    uint8_t *show = s->pages[1].show;
+    show[HOME_ALARM] = LABELED_ICON;
+    show[HOME_TEMPERATURES] = TEMPS_VALUES;
+    show[HOME_OPENINGS] = show[HOME_LIGHTS] = NAMES_COUNT;
+}
+static void home_short(projector_snapshot_t *s)
+{
+    uint8_t *show = s->pages[1].show;
+    show[HOME_ALARM] = LABELED_OFF;
+    show[HOME_LIGHTS] = NAMES_OFF;
+}
+static void weather_compact(projector_snapshot_t *s)
+{
+    uint8_t *show = s->pages[2].show;
+    show[WEATHER_DETAILS] = DETAILS_CONDITION;
+    show[WEATHER_PERIODS] = SHOW_OFF;
+    show[WEATHER_RAIN] = SHOW_OFF;
+}
+static void agenda_one(projector_snapshot_t *s)
+{
+    s->pages[3].show[AGENDA_EVENTS] = EVENTS_1;
+    s->pages[3].show[AGENDA_EVENT_TIME] = SHOW_OFF;
+    s->pages[3].show[AGENDA_WAKE] = AGENDA_WAKE_TIME;
+}
+static void climate_plain(projector_snapshot_t *s)
+{
+    s->pages[4].show[CLIMATE_DIAL] = SHOW_OFF;
+    s->pages[4].show[CLIMATE_STATUS] = LABELED_LABEL;
+}
+static void no_dots(projector_snapshot_t *s) { s->theme.dots = false; }
+
 int main(int argc, char **argv)
 {
     const char *out = argc > 1 ? argv[1] : ".";
@@ -148,20 +252,19 @@ int main(int argc, char **argv)
         bool busy;
         time_t time;
         int diameter;
-        const char *const *widgets; /* Replaces the list page widgets when set. */
+        void (*setup)(projector_snapshot_t *s); /* Changes to the sample settings, or NULL. */
         const char *message, *icon;
         bool stale;
         int thermostat; /* Variant for the climate page, shown in place of the list page when > 0. */
-        const char *wake_display; /* Replaces the default "icon" when set. */
     } scenarios[] = {
         {"clock_quiet", 0, false, afternoon, 112},
         {"clock_busy", 0, true, afternoon, 112},
         {"clock_night", 0, true, night, 112},
-        {"clock_night_time", 0, true, night, 112, NULL, NULL, NULL, false, 0, "time"},
-        {"clock_night_countdown", 0, true, night, 112, NULL, NULL, NULL, false, 0, "countdown"},
-        {"clock_night_countdown_96", 0, true, night, 96, NULL, NULL, NULL, false, 0, "countdown"},
-        {"clock_night_time_128", 0, true, night, 128, NULL, NULL, NULL, false, 0, "time"},
-        {"clock_night_none", 0, true, night, 112, NULL, NULL, NULL, false, 0, "none"},
+        {"clock_night_time", 0, true, night, 112, wake_time},
+        {"clock_night_countdown", 0, true, night, 112, wake_countdown},
+        {"clock_night_countdown_96", 0, true, night, 96, wake_countdown},
+        {"clock_night_time_128", 0, true, night, 128, wake_time},
+        {"clock_night_none", 0, true, night, 112, wake_none},
         {"home_quiet", 1, false, afternoon, 112},
         {"home_busy", 1, true, afternoon, 112},
         {"weather_day", 2, false, afternoon, 112},
@@ -172,9 +275,9 @@ int main(int argc, char **argv)
         {"clock_busy_128", 0, true, afternoon, 128},
         {"weather_day_128", 2, false, afternoon, 128},
         {"list_busy", 4, true, afternoon, 112},
-        {"list_rooms", 4, true, afternoon, 112, (const char *const[]){"indoor", "outdoor", "sun"}},
-        {"list_agenda", 4, true, afternoon, 112, (const char *const[]){"wake", "event", "moon"}},
-        {"list_agenda_quiet", 4, false, afternoon, 112, (const char *const[]){"wake", "event", "lights"}},
+        {"list_rooms", 4, true, afternoon, 112, list_rooms},
+        {"list_agenda", 4, true, afternoon, 112, list_agenda},
+        {"list_agenda_quiet", 4, false, afternoon, 112, list_agenda_quiet},
         {"agenda_busy", 3, true, afternoon, 112},
         {"agenda_quiet", 3, false, afternoon, 112},
         {"agenda_stale", 3, true, afternoon, 112, NULL, NULL, NULL, true},
@@ -193,18 +296,31 @@ int main(int argc, char **argv)
         {"climate_unknown", 4, false, afternoon, 112, NULL, NULL, NULL, false, 9},
         {"climate_heating_96", 4, false, afternoon, 96, NULL, NULL, NULL, false, 1},
         {"climate_cooling_128", 4, false, afternoon, 128, NULL, NULL, NULL, false, 3},
-        {"list_thermostat", 4, false, afternoon, 112, (const char *const[]){"thermostat", "indoor", "outdoor"},
-         NULL, NULL, false, 0},
+        {"list_thermostat", 4, false, afternoon, 112, list_thermostat},
+        /* Page settings from the web UI. */
+        {"set_clock_minimal", 0, true, afternoon, 112, clock_minimal},
+        {"set_clock_icons", 0, true, night, 112, clock_icons},
+        {"set_clock_red", 0, true, night, 112, theme_red},
+        {"set_clock_mono", 0, true, afternoon, 112, theme_mono},
+        {"set_clock_large_96", 0, true, afternoon, 96, large},
+        {"set_clock_small_128", 0, true, afternoon, 128, small},
+        {"set_home_counts", 1, true, afternoon, 112, home_counts},
+        {"set_home_short", 1, true, afternoon, 112, home_short},
+        {"set_home_red", 1, true, afternoon, 112, theme_red},
+        {"set_weather_compact", 2, false, afternoon, 112, weather_compact},
+        {"set_weather_large", 2, false, afternoon, 112, large},
+        {"set_agenda_one", 3, true, afternoon, 112, agenda_one},
+        {"set_climate_plain", 4, false, afternoon, 112, climate_plain, NULL, NULL, false, 1},
+        {"set_climate_red", 4, false, afternoon, 112, theme_red, NULL, NULL, false, 1},
+        {"set_list_icons", 4, true, afternoon, 112, list_icons},
+        {"set_list_icons_96", 4, true, afternoon, 96, list_icons},
+        {"set_list_values", 4, true, afternoon, 112, list_values},
+        {"set_list_no_dots", 4, true, afternoon, 112, no_dots},
     };
     for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); ++i) {
         static projector_snapshot_t s;
         sample(&s, scenarios[i].busy);
         s.page_index = scenarios[i].page;
-        if (scenarios[i].wake_display)
-            snprintf(s.wake_display, sizeof(s.wake_display), "%s", scenarios[i].wake_display);
-        if (scenarios[i].widgets)
-            for (int w = 0; w < PROJECTOR_MAX_WIDGETS; ++w)
-                snprintf(s.pages[4].widgets[w], sizeof(s.pages[4].widgets[w]), "%s", scenarios[i].widgets[w]);
         if (scenarios[i].message) {
             s.message.active = true;
             snprintf(s.message.text, sizeof(s.message.text), "%s", scenarios[i].message);
@@ -212,7 +328,9 @@ int main(int argc, char **argv)
         }
         thermostat(&s.ha.thermostat, scenarios[i].thermostat ? scenarios[i].thermostat - 1 : 0);
         if (scenarios[i].thermostat)
-            s.pages[4] = (projector_page_t){.id="climate", .name="Termostato", .layout="climate"};
+            s.pages[4] = (projector_page_t){.id="climate", .name="Termostato", .layout=LAYOUT_CLIMATE,
+                                            .tomorrow_from=PROJECTOR_TOMORROW_DEFAULT};
+        if (scenarios[i].setup) scenarios[i].setup(&s);
         if (scenarios[i].stale) {
             /* As projector_snapshot() delivers HA data after its TTL. */
             memset(&s.ha, 0, sizeof(s.ha));

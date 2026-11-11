@@ -124,10 +124,11 @@ int projector_relative_day(int year, int month, int day, const char *date)
     return -1;
 }
 
-/* From 21:00 the forecast that matters is the next day's. */
-bool projector_shows_tomorrow(int hour)
+/* From the hour from (21:00 by default) the forecast that matters is the next day's;
+ * PROJECTOR_TOMORROW_NEVER keeps today's. */
+bool projector_shows_tomorrow(int hour, int from)
 {
-    return hour >= 21;
+    return from < PROJECTOR_TOMORROW_NEVER && hour >= from;
 }
 
 /* Whether an alarm wake_day days from today at wake_hour rings in the coming morning:
@@ -202,4 +203,144 @@ void projector_format_tenths(int tenths, char *out, size_t size)
     const char *sign = tenths < 0 ? "-" : "";
     if (magnitude % 10) snprintf(out, size, "%s%d.%d", sign, magnitude / 10, magnitude % 10);
     else snprintf(out, size, "%s%d", sign, magnitude / 10);
+}
+
+/* ---- Page schema ---- */
+
+#define COUNT(items) ((uint8_t)(sizeof(items) / sizeof((items)[0])))
+
+static const char *const on_off[] = {[SHOW_ON] = "on", [SHOW_OFF] = "off"};
+static const char *const status_modes[] = {[STATUS_COUNT] = "count", [STATUS_ICON] = "icon",
+                                           [STATUS_OFF] = "off"};
+static const char *const labeled_modes[] = {[LABELED_ICON_LABEL] = "icon_label", [LABELED_LABEL] = "label",
+                                            [LABELED_ICON] = "icon", [LABELED_OFF] = "off"};
+static const char *const names_modes[] = {[NAMES_ALL] = "names", [NAMES_COUNT] = "count", [NAMES_OFF] = "off"};
+
+static const projector_element_t clock_elements[] = {
+    [CLOCK_FORECAST] = {"forecast", (const char *const[]){[FORECAST_ICON_TEMPS] = "icon_temps",
+        [FORECAST_TEMPS] = "temps", [FORECAST_ICON] = "icon", [FORECAST_OFF] = "off"}, 4},
+    [CLOCK_OPENINGS] = {"openings", status_modes, COUNT(status_modes)},
+    [CLOCK_LIGHTS] = {"lights", status_modes, COUNT(status_modes)},
+    [CLOCK_ALARM] = {"alarm", (const char *const[]){[SHOW_ON] = "icon", [SHOW_OFF] = "off"}, 2},
+    [CLOCK_WAKE] = {"wake", (const char *const[]){[WAKE_ICON] = "icon", [WAKE_TIME] = "time",
+        [WAKE_COUNTDOWN] = "countdown", [WAKE_OFF] = "off"}, 4},
+    [CLOCK_DATE] = {"date", (const char *const[]){[DATE_FULL] = "full", [DATE_SHORT] = "short",
+        [DATE_OFF] = "off"}, 3},
+    [CLOCK_SUN] = {"sun", on_off, COUNT(on_off)},
+};
+
+static const projector_element_t home_elements[] = {
+    [HOME_ALARM] = {"alarm", labeled_modes, COUNT(labeled_modes)},
+    [HOME_TEMPERATURES] = {"temperatures", (const char *const[]){[TEMPS_ICONS] = "icons",
+        [TEMPS_VALUES] = "values", [TEMPS_OFF] = "off"}, 3},
+    [HOME_OPENINGS] = {"openings", names_modes, COUNT(names_modes)},
+    [HOME_LIGHTS] = {"lights", names_modes, COUNT(names_modes)},
+};
+
+static const projector_element_t weather_elements[] = {
+    [WEATHER_NOW] = {"now", (const char *const[]){[NOW_ICON_TEMP] = "icon_temp", [NOW_TEMP] = "temp",
+        [NOW_ICON] = "icon"}, 3},
+    [WEATHER_DETAILS] = {"details", (const char *const[]){[DETAILS_FULL] = "full",
+        [DETAILS_CONDITION] = "condition", [DETAILS_OFF] = "off"}, 3},
+    [WEATHER_PERIODS] = {"periods", on_off, COUNT(on_off)},
+    [WEATHER_RAIN] = {"rain", on_off, COUNT(on_off)},
+    [WEATHER_SUMMARY] = {"summary", on_off, COUNT(on_off)},
+};
+
+static const projector_element_t agenda_elements[] = {
+    [AGENDA_WAKE] = {"wake", (const char *const[]){[AGENDA_WAKE_TIME_DAY] = "time_day",
+        [AGENDA_WAKE_TIME] = "time", [AGENDA_WAKE_OFF] = "off"}, 3},
+    [AGENDA_EVENTS] = {"events", (const char *const[]){[EVENTS_3] = "3", [EVENTS_2] = "2", [EVENTS_1] = "1",
+        [EVENTS_OFF] = "off"}, 4},
+    [AGENDA_EVENT_TIME] = {"event_time", on_off, COUNT(on_off)},
+};
+
+static const projector_element_t climate_elements[] = {
+    [CLIMATE_DIAL] = {"dial", on_off, COUNT(on_off)},
+    [CLIMATE_STATUS] = {"status", labeled_modes, COUNT(labeled_modes)},
+    [CLIMATE_PRESET] = {"preset", on_off, COUNT(on_off)},
+    [CLIMATE_CURRENT] = {"current", on_off, COUNT(on_off)},
+    [CLIMATE_HUMIDITY] = {"humidity", on_off, COUNT(on_off)},
+};
+
+static const projector_element_t list_elements[] = {
+    [LIST_HEADER] = {"header", on_off, COUNT(on_off)},
+};
+
+const projector_layout_t projector_layouts[LAYOUT_COUNT] = {
+    [LAYOUT_CLOCK] = {"clock", clock_elements, COUNT(clock_elements)},
+    [LAYOUT_HOME] = {"home", home_elements, COUNT(home_elements)},
+    [LAYOUT_WEATHER] = {"weather", weather_elements, COUNT(weather_elements)},
+    [LAYOUT_AGENDA] = {"agenda", agenda_elements, COUNT(agenda_elements)},
+    [LAYOUT_CLIMATE] = {"climate", climate_elements, COUNT(climate_elements)},
+    [LAYOUT_LIST] = {"list", list_elements, COUNT(list_elements)},
+};
+
+const char *const projector_widgets[WIDGET_COUNT] = {
+    [WIDGET_OPENINGS] = "openings", [WIDGET_ALARM] = "alarm", [WIDGET_DATE] = "date",
+    [WIDGET_WEATHER] = "weather", [WIDGET_ENTITY1] = "entity1", [WIDGET_ENTITY2] = "entity2",
+    [WIDGET_ENTITY3] = "entity3", [WIDGET_ENTITY4] = "entity4", [WIDGET_TEXT] = "text",
+    [WIDGET_INDOOR] = "indoor", [WIDGET_OUTDOOR] = "outdoor", [WIDGET_LIGHTS] = "lights",
+    [WIDGET_SUN] = "sun", [WIDGET_WAKE] = "wake", [WIDGET_EVENT] = "event", [WIDGET_MOON] = "moon",
+    [WIDGET_THERMOSTAT] = "thermostat",
+};
+const char *const projector_styles[STYLE_COUNT] = {
+    [STYLE_LABEL_VALUE] = "label_value", [STYLE_VALUE] = "value", [STYLE_ICON_VALUE] = "icon_value",
+};
+const char *const projector_sizes[SIZE_COUNT] = {
+    [SIZE_NORMAL] = "normal", [SIZE_SMALL] = "small", [SIZE_LARGE] = "large",
+};
+const char *const projector_palettes[PALETTE_COUNT] = {
+    [PALETTE_COLOR] = "color", [PALETTE_MONO] = "mono", [PALETTE_RED] = "red",
+};
+
+/* Index of name in names, or -1. */
+int projector_name_index(const char *name, const char *const *names, int count)
+{
+    for (int i = 0; name && i < count; ++i)
+        if (!strcmp(name, names[i])) return i;
+    return -1;
+}
+
+int projector_layout_index(const char *name)
+{
+    for (int i = 0; name && i < LAYOUT_COUNT; ++i)
+        if (!strcmp(name, projector_layouts[i].name)) return i;
+    return -1;
+}
+
+int projector_element_index(int layout, const char *name)
+{
+    if (layout < 0 || layout >= LAYOUT_COUNT) return -1;
+    const projector_layout_t *l = &projector_layouts[layout];
+    for (int i = 0; name && i < l->element_count; ++i)
+        if (!strcmp(name, l->elements[i].name)) return i;
+    return -1;
+}
+
+int projector_mode_index(int layout, int element, const char *name)
+{
+    if (layout < 0 || layout >= LAYOUT_COUNT || element < 0 ||
+        element >= projector_layouts[layout].element_count) return -1;
+    const projector_element_t *e = &projector_layouts[layout].elements[element];
+    return projector_name_index(name, e->modes, e->mode_count);
+}
+
+/* Font level 0 (largest) to 3 (smallest) for a circle's level and a page text size. */
+int projector_size_level(int level, int size)
+{
+    level += size == SIZE_SMALL ? 1 : size == SIZE_LARGE ? -1 : 0;
+    return level < 0 ? 0 : level > 3 ? 3 : level;
+}
+
+/* A colour as the palette shows it: unchanged, or its luminance in one hue (tint for mono,
+ * deep red for the night palette, which spares dark-adapted eyes). Black stays black. */
+uint32_t projector_tint(uint32_t color, int palette, uint32_t tint)
+{
+    if (palette != PALETTE_MONO && palette != PALETTE_RED) return color;
+    if (palette == PALETTE_RED) tint = 0xff2000;
+    uint32_t luminance = (((color >> 16) & 0xff) * 77 + ((color >> 8) & 0xff) * 150 + (color & 0xff) * 29) >> 8;
+    uint32_t r = ((tint >> 16) & 0xff) * luminance / 255, g = ((tint >> 8) & 0xff) * luminance / 255;
+    uint32_t b = (tint & 0xff) * luminance / 255;
+    return r << 16 | g << 8 | b;
 }
