@@ -369,6 +369,7 @@ async function loadAll() {
   calibration = calibrationData;
   $("ha-token").value = token;
   $("timezone").value = configuration.timezone;
+  $("discovery").checked = configuration.discovery;
   renderPageSelect();
   renderPages();
   renderTheme();
@@ -452,6 +453,17 @@ $("theme-dots").addEventListener("change", () => { theme.dots = $("theme-dots").
 $("cancel-preview").addEventListener("click", () => run(async () => {
   applyStatus(await request("/api/pages/preview", "POST", { cancel: true }));
   message("Prova annullata: il proiettore mostra di nuovo le pagine salvate");
+}));
+
+$("discovery").addEventListener("change", () => run(async () => {
+  try {
+    const configuration = await request("/api/config", "POST", { discovery: $("discovery").checked });
+    $("discovery").checked = configuration.discovery;
+  } catch (error) {
+    $("discovery").checked = !$("discovery").checked;
+    throw error;
+  }
+  message($("discovery").checked ? "Rilevamento automatico attivo" : "Rilevamento automatico disattivato");
 }));
 
 $("save-network").addEventListener("click", () => {

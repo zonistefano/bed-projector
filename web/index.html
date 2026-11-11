@@ -75,6 +75,8 @@
         <input id="ha-token" type="password" readonly autocomplete="off" spellcheck="false">
         <div class="actions"><button id="show-ha-token" type="button">Mostra e seleziona token</button></div>
         <p class="hint">Copia il valore selezionato e incollalo nella configurazione dell'integrazione. Conservalo come una password.</p>
+        <div class="row"><input id="discovery" type="checkbox"><label for="discovery">Rilevamento automatico</label></div>
+        <p class="hint">Annuncia il proiettore sulla rete, così Home Assistant lo propone da solo e ne segue i cambi di indirizzo IP. Disattivalo se non vuoi che compaia tra i dispositivi rilevati: l'integrazione già configurata continua a funzionare, ma se l'IP cambia va aggiornato a mano. Si applica subito.</p>
         <p id="ha-summary" aria-live="polite"></p>
       </section>
       <section class="card">
