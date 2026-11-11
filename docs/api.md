@@ -267,7 +267,7 @@ Campi obbligatori:
 - `openings_known` e `lights_known` (booleani). Quando sono `true`, `openings` e `lights` sono richiesti e sono interi da 0 a 99. Se il conteggio non è disponibile, usa `false`: il display mostra `?` e il numero viene ignorato. Le luci contate escludono la proiezione.
 - `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`.
 - `weather` (condizione attuale di HA, massimo 31 byte UTF-8), `temperature` (15 byte) ed `extras` (fino a quattro valori da 31 byte).
-- `wake_known` ed `events_known` (booleani): `false` quando l'entità della sveglia (sensore timestamp o `input_datetime`) o i calendari non sono configurati o non sono disponibili. Il display mostra allora `?`, mai "nessuna sveglia" o "nessun evento".
+- `wake_known` ed `events_known` (booleani): `false` quando l'entità della sveglia (sensore timestamp o `input_datetime`), l'eventuale interruttore che la attiva o i calendari non sono configurati o non sono disponibili. Il display mostra allora `?`, mai "nessuna sveglia" o "nessun evento".
 
 Campi facoltativi: se mancano o sono `null` il dato è sconosciuto; se presenti devono essere validi, altrimenti l'intero snapshot è rifiutato.
 
@@ -279,7 +279,7 @@ Campi facoltativi: se mancano o sono `null` il dato è sconosciuto; se presenti 
 | `humidity` | Intero da 0 a 100 |
 | `wind` | Vento già formattato, massimo 15 byte |
 | `days` | Fino a 2 giorni, oggi e domani |
-| `wake` | Prossima sveglia `{"date":"AAAA-MM-GG","time":"HH:MM"}` locale di HA; `null` se non ce n'è una nei prossimi 7 giorni |
+| `wake` | Prossima sveglia `{"date":"AAAA-MM-GG","time":"HH:MM"}` locale di HA; `null` se non ce n'è una nei prossimi 7 giorni o se l'interruttore della sveglia è spento |
 | `events` | Fino a 3 eventi `{"date","time","title"}` da adesso alla fine di domani: `time` vuoto per gli eventi di tutto il giorno o iniziati prima di oggi, `title` non vuoto e al massimo 31 byte |
 | `thermostat` | Termostato della camera mostrato dalla pagina `climate`; `null` se non configurato o non disponibile (vedi sotto) |
 
