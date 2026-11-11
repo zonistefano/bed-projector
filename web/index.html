@@ -29,14 +29,7 @@
         <div class="actions"><button id="previous-page">Precedente</button><button id="next-page">Successiva</button></div>
         <label for="page-timeout">Ritorno alla pagina Ora dopo (secondi, 0 = mai)</label>
         <input id="page-timeout" type="number" min="0" max="3600" step="1" value="30">
-        <label for="wake-display">Sveglia nella pagina Ora</label>
-        <select id="wake-display">
-          <option value="icon">Solo icona</option>
-          <option value="time">Icona e ora della sveglia</option>
-          <option value="countdown">Icona e tempo mancante</option>
-          <option value="none">Niente</option>
-        </select>
-        <p class="hint">Luminosità, ritorno e sveglia si applicano appena li modifichi.</p>
+        <p class="hint">Luminosità e ritorno si applicano appena li modifichi.</p>
       </section>
       <section class="card">
         <h2>Centraggio e orientamento</h2>
@@ -55,10 +48,25 @@
         <div class="actions"><button id="calibration-save">Salva regolazione</button><button id="calibration-cancel" type="button" class="secondary">Annulla</button></div>
       </section>
       <section class="card">
-        <h2>Pagine</h2>
-        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine: Casa, Meteo, Agenda e Termostato hanno un design fisso, il modello Elenco mostra fino a tre widget. Le modifiche valgono dopo <strong>Salva pagine</strong>.</p>
+        <h2>Pagine e aspetto</h2>
+        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine. Per ogni pagina scegli la dimensione del testo e, elemento per elemento, se e come mostrarlo; il modello Elenco mostra fino a quattro righe a scelta. Con <strong>Prova sul proiettore</strong> vedi la bozza senza salvarla: torna da sola alla configurazione salvata dopo 2 minuti. Le modifiche restano solo dopo <strong>Salva pagine</strong>.</p>
+        <div class="page-editor">
+          <h3>Tema</h3>
+          <div class="page-grid">
+            <label for="theme-palette">Colori
+              <select id="theme-palette">
+                <option value="color">Normali</option>
+                <option value="mono">Una sola tinta</option>
+                <option value="red">Rosso notte (meno abbagliante)</option>
+              </select>
+            </label>
+            <label for="theme-tint" id="theme-tint-label">Tinta<input id="theme-tint" type="color" value="#ffb36b"></label>
+            <div class="row"><input id="theme-dots" type="checkbox" checked><label for="theme-dots">Puntini delle pagine</label></div>
+          </div>
+        </div>
         <div id="pages"></div>
-        <div class="actions"><button id="add-page">Aggiungi pagina</button><button id="save-pages">Salva pagine</button></div>
+        <p id="preview-state" class="hint" aria-live="polite" hidden>Prova in corso sul proiettore: la bozza non è salvata.</p>
+        <div class="actions"><button id="add-page">Aggiungi pagina</button><button id="save-pages">Salva pagine</button><button id="cancel-preview" type="button" class="secondary" hidden>Annulla prova</button></div>
       </section>
       <section class="card">
         <h2>Home Assistant</h2>

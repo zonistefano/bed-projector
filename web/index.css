@@ -3,3 +3,4 @@
 
 .calibration-controls{display:flex;flex-wrap:wrap;gap:2rem;align-items:center;margin-top:1rem}.calibration-direction{text-align:center}.calibration-direction>button{display:block;margin:.25rem auto}.calibration-direction>div{display:flex;gap:1.5rem}
 .confirm{border:1px solid #f0b86b;border-radius:8px;padding:.8rem 1rem;margin-top:1rem}.confirm p{margin:0}button.secondary{background:#34475b;color:#e9eef5}button.secondary:hover{background:#4a6079}progress{width:100%;height:1rem;margin-top:1rem}
+.page-editor h4{margin:1rem 0 0;font-size:1rem;color:#b8c9d9}.widget-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;border-top:1px solid #34475b;margin-top:.8rem}

@@ -2,7 +2,8 @@ const $ = id => document.getElementById(id);
 const TOKEN_KEY = "bed-projector-token";
 const STATUS_POLL_MS = 15000;
 const MAX_PAGES = 5;
-const MAX_WIDGETS = 3;
+const MAX_WIDGETS = 4;
+const TOMORROW_DEFAULT = 21;
 
 const alarmLabels = {
   disarmed: "disinserito", armed_home: "in casa", armed_away: "fuori casa", armed_night: "notte",
@@ -22,6 +23,49 @@ const widgetLabels = {
   lights: "Luci accese", sun: "Alba e tramonto", wake: "Prossima sveglia", event: "Prossimo evento",
   moon: "Fase lunare", thermostat: "Termostato",
 };
+/* Mirrors the page schema in main/projector_logic.c: [value, label] pairs in the firmware's order,
+ * the first being the default. */
+const off = ["off", "Nascosto"];
+const onOff = [["on", "Visibile"], off];
+const layoutElements = {
+  clock: [
+    ["forecast", "Previsione", [["icon_temps", "Icona e temperature"], ["temps", "Solo temperature"], ["icon", "Solo icona"], off]],
+    ["openings", "Porte e finestre aperte", [["count", "Icona e numero"], ["icon", "Solo icona"], off]],
+    ["lights", "Luci accese", [["count", "Icona e numero"], ["icon", "Solo icona"], off]],
+    ["alarm", "Allarme inserito", [["icon", "Icona"], off]],
+    ["wake", "Sveglia di domattina", [["icon", "Solo icona"], ["time", "Icona e ora"], ["countdown", "Icona e tempo mancante"], off]],
+    ["date", "Data", [["full", "Completa (Sab 10 Ottobre)"], ["short", "Breve (Sab 10)"], off]],
+    ["sun", "Alba e tramonto", onOff],
+  ],
+  home: [
+    ["alarm", "Allarme", [["icon_label", "Icona e stato"], ["label", "Solo stato"], ["icon", "Solo icona"], off]],
+    ["temperatures", "Temperature camera ed esterno", [["icons", "Con icone"], ["values", "Solo valori"], off]],
+    ["openings", "Porte e finestre", [["names", "Nomi di quelle aperte"], ["count", "Solo quante"], off]],
+    ["lights", "Luci", [["names", "Nomi di quelle accese"], ["count", "Solo quante"], off]],
+  ],
+  weather: [
+    ["now", "Adesso", [["icon_temp", "Icona e temperatura"], ["temp", "Solo temperatura"], ["icon", "Solo icona"]]],
+    ["details", "Dettagli", [["full", "Condizione, percepita, umidità, vento"], ["condition", "Solo condizione"], off]],
+    ["periods", "Giorno e sera", onOff],
+    ["rain", "Probabilità di pioggia", onOff],
+    ["summary", "Riepilogo della giornata", onOff],
+  ],
+  agenda: [
+    ["wake", "Sveglia", [["time_day", "Ora e giorno"], ["time", "Solo ora"], off]],
+    ["events", "Eventi", [["3", "Fino a 3"], ["2", "Fino a 2"], ["1", "Solo il prossimo"], off]],
+    ["event_time", "Quando inizia l'evento", onOff],
+  ],
+  climate: [
+    ["dial", "Rotella", onOff],
+    ["status", "Stato", [["icon_label", "Icona e stato"], ["label", "Solo stato"], ["icon", "Solo icona"], off]],
+    ["preset", "Preset (es. Eco)", onOff],
+    ["current", "Temperatura della stanza", onOff],
+    ["humidity", "Umidità", onOff],
+  ],
+  list: [["header", "Intestazione con il nome", onOff]],
+};
+const sizeLabels = { normal: "Normale", small: "Piccolo", large: "Grande" };
+const styleLabels = { label_value: "Etichetta e valore", value: "Solo valore", icon_value: "Icona e valore" };
 const layoutLabels = {
   home: "Casa (allarme, temperature, aperture, luci)", weather: "Meteo (adesso, giorno e sera)",
   agenda: "Agenda (sveglia ed eventi)", climate: "Termostato (rotella con temperatura impostata e attuale)",
@@ -38,6 +82,7 @@ function storeToken(value) {
 let token = storedToken();
 let savedPages = [];  // As stored on the device: feeds the page selector.
 let pages = [];       // Editor draft: survives other actions until "Salva pagine".
+let theme = {};       // Draft theme, saved with the pages.
 let calibration = null;
 let calibrationPending = false;
 let pollTimer = null;
@@ -117,7 +162,7 @@ function applyStatus(status) {
     $("brightness-value").textContent = `${status.brightness}%`;
   }
   if (document.activeElement !== $("page-timeout")) $("page-timeout").value = status.page_timeout;
-  $("wake-display").value = status.wake_display;
+  $("preview-state").hidden = $("cancel-preview").hidden = !status.preview;
   const current = savedPages.find(page => page.id === status.page);
   $("state-summary").textContent = `Pagina: ${current ? current.name : status.page} · ` +
     `Wi-Fi: ${status.wifi_connected ? "connesso" : "non connesso"}`;
@@ -163,45 +208,102 @@ function pageButton(label, disabled, onClick) {
   return button;
 }
 
+const firstMode = modes => modes[0][0];
+const showsTomorrow = page => page.layout === "clock" || page.layout === "weather";
+
+function widgetRow(page, slot) {
+  const widget = page.widgets[slot] || { widget: "", style: "label_value", text: "" };
+  const row = element("div", { className: "widget-row" });
+  const update = () => {
+    page.widgets[slot] = widget;
+    row.replaceChildren(
+      pageSelect(`Riga ${slot + 1}`, [["", "Nessuna"], ...Object.entries(widgetLabels)], widget.widget,
+                 value => { widget.widget = value; update(); }),
+      pageSelect("Come", Object.entries(styleLabels), widget.style || "label_value", value => { widget.style = value; }),
+    );
+    if (widget.widget === "text")
+      row.append(pageField("Testo", widget.text || "", 32, value => { widget.text = value; }));
+  };
+  update();
+  return row;
+}
+
 function renderPages() {
   $("pages").replaceChildren(...pages.map((page, index) => {
+    page.show ??= {};
+    page.widgets ??= [];
     const title = element("h3", { textContent: `${index + 1}. ${page.name}` });
     const grid = element("div", { className: "page-grid" }, [
       pageField("Nome", page.name, 16, value => { page.name = value; title.textContent = `${index + 1}. ${value}`; }),
     ]);
     if (index > 0)
       grid.append(pageSelect("Modello", Object.entries(layoutLabels), page.layout,
-                             value => { page.layout = value; renderPages(); }));
-    // Ora, Casa, Meteo, Agenda e Termostato hanno un design fisso: i widget servono solo al modello Elenco.
-    if (page.layout === "list") {
-      for (let slot = 0; slot < MAX_WIDGETS; slot++)
-        grid.append(pageSelect(`Widget ${slot + 1}`, [["", "Nessuno"], ...Object.entries(widgetLabels)],
-                               page.widgets[slot] || "", value => { page.widgets[slot] = value; }));
-      grid.append(pageField("Testo (widget Testo libero)", page.text || "", 32, value => { page.text = value; }));
+                             value => { page.layout = value; page.show = {}; renderPages(); }));
+    grid.append(pageSelect("Dimensione testo", Object.entries(sizeLabels), page.size || "normal",
+                           value => { page.size = value; }));
+    if (showsTomorrow(page)) {
+      const hour = element("input", { type: "number", min: 0, max: 24, step: 1, value: page.tomorrow_from ?? TOMORROW_DEFAULT });
+      hour.addEventListener("input", () => { page.tomorrow_from = Number(hour.value); });
+      grid.append(element("label", { textContent: "Previsione di domani dalle ore (24 = mai)" }, [hour]));
     }
-    const card = element("div", { className: "page-editor" }, [title, grid]);
+    const elements = element("div", { className: "page-grid" }, layoutElements[page.layout].map(([key, label, modes]) =>
+      pageSelect(label, modes, page.show[key] ?? firstMode(modes), value => { page.show[key] = value; })));
+    const card = element("div", { className: "page-editor" }, [title, grid, element("h4", { textContent: "Elementi" }), elements]);
+    if (page.layout === "list")
+      for (let slot = 0; slot < MAX_WIDGETS; slot++) card.append(widgetRow(page, slot));
+    const actions = element("div", { className: "actions" });
+    const trial = element("button", { type: "button", textContent: "Prova sul proiettore" });
+    trial.addEventListener("click", () => run(async () => {
+      applyStatus(await request("/api/pages/preview", "POST", { ...pagesDocument(), page: page.id }));
+      message(`Prova di “${page.name}” sul proiettore: salva per tenerla, altrimenti torna com'era tra 2 minuti`);
+    }));
+    actions.append(trial);
     if (index > 0) {
       const swap = target => { [pages[index], pages[target]] = [pages[target], pages[index]]; };
-      card.append(element("div", { className: "actions" }, [
+      actions.append(
         pageButton("Su", index === 1, () => swap(index - 1)),
         pageButton("Giù", index === pages.length - 1, () => swap(index + 1)),
         pageButton("Rimuovi", false, () => pages.splice(index, 1)),
-      ]));
+      );
     }
+    card.append(actions);
     return card;
   }));
   $("add-page").disabled = pages.length >= MAX_PAGES;
 }
 
-function validatePages() {
-  for (const [index, page] of pages.entries()) {
+function renderTheme() {
+  $("theme-palette").value = theme.palette;
+  $("theme-tint").value = theme.tint;
+  $("theme-dots").checked = theme.dots;
+  $("theme-tint-label").hidden = theme.palette !== "mono";
+}
+
+/* The draft as the /api/pages document; throws on a value the projector would refuse. */
+function pagesDocument() {
+  const list = pages.map((page, index) => {
     const name = page.name.trim();
     if (!name || utf8Length(name) > 16 || /[\u0000-\u001f\u007f]/.test(name))
       throw new Error(`Pagina ${index + 1}: il nome deve avere da 1 a 16 caratteri`);
-    if (page.layout === "list" && utf8Length(page.text || "") > 32)
-      throw new Error(`Pagina ${index + 1}: il testo può avere al massimo 32 caratteri`);
-  }
-  return pages.map(page => ({ ...page, name: page.name.trim(), widgets: page.widgets.filter(Boolean) }));
+    const show = Object.fromEntries(layoutElements[page.layout].map(([key, , modes]) =>
+      [key, page.show[key] ?? firstMode(modes)]));
+    const out = { id: page.id, name, layout: page.layout, size: page.size || "normal", show };
+    if (showsTomorrow(page)) {
+      const hour = page.tomorrow_from ?? TOMORROW_DEFAULT;
+      if (!Number.isInteger(hour) || hour < 0 || hour > 24)
+        throw new Error(`Pagina ${index + 1}: l'ora della previsione di domani va da 0 a 24`);
+      out.tomorrow_from = hour;
+    }
+    if (page.layout === "list")
+      out.widgets = page.widgets.filter(widget => widget && widget.widget).map(widget => {
+        if (widget.widget !== "text") return { widget: widget.widget, style: widget.style || "label_value" };
+        if (utf8Length(widget.text || "") > 32 || /[\u0000-\u001f\u007f]/.test(widget.text || ""))
+          throw new Error(`Pagina ${index + 1}: il testo può avere al massimo 32 caratteri`);
+        return { widget: "text", style: widget.style || "label_value", text: widget.text || "" };
+      });
+    return out;
+  });
+  return { theme: { ...theme }, pages: list };
 }
 
 /* ---- Calibration ---- */
@@ -263,11 +365,13 @@ async function loadAll() {
   showApp(true);
   savedPages = pageData.pages;
   pages = structuredClone(savedPages);
+  theme = { ...pageData.theme };
   calibration = calibrationData;
   $("ha-token").value = token;
   $("timezone").value = configuration.timezone;
   renderPageSelect();
   renderPages();
+  renderTheme();
   renderCalibration();
   applyStatus(status);
 }
@@ -305,7 +409,6 @@ $("page-timeout").addEventListener("change", () => run(async () => {
   await display({ page_timeout: seconds });
   message(seconds ? `La pagina Ora torna dopo ${seconds} secondi` : "La pagina scelta resta visibile");
 }));
-$("wake-display").addEventListener("change", () => run(() => display({ wake_display: $("wake-display").value })));
 $("current-page").addEventListener("change", () => run(() => display({ page: $("current-page").value })));
 for (const [button, move] of [["previous-page", "previous"], ["next-page", "next"]])
   $(button).addEventListener("click", () => run(() => display({ move })));
@@ -327,16 +430,28 @@ $("calibration-mirror").addEventListener("click", () => run(() =>
 $("add-page").addEventListener("click", () => {
   let n = 1;
   while (pages.some(page => page.id === `page${n}`)) n++;
-  pages.push({ id: `page${n}`, name: `Pagina ${n}`, layout: "list", widgets: ["entity1"], text: "" });
+  pages.push({ id: `page${n}`, name: `Pagina ${n}`, layout: "list", size: "normal", show: {},
+               widgets: [{ widget: "entity1", style: "label_value" }] });
   renderPages();
 });
 $("save-pages").addEventListener("click", () => run(async () => {
-  savedPages = (await request("/api/pages", "PUT", { pages: validatePages() })).pages;
+  const saved = await request("/api/pages", "PUT", pagesDocument());
+  savedPages = saved.pages;
   pages = structuredClone(savedPages);
+  theme = { ...saved.theme };
   renderPageSelect();
   renderPages();
+  renderTheme();
   applyStatus(await request("/api/status"));
   message("Pagine salvate");
+}));
+
+$("theme-palette").addEventListener("change", () => { theme.palette = $("theme-palette").value; renderTheme(); });
+$("theme-tint").addEventListener("input", () => { theme.tint = $("theme-tint").value; });
+$("theme-dots").addEventListener("change", () => { theme.dots = $("theme-dots").checked; });
+$("cancel-preview").addEventListener("click", () => run(async () => {
+  applyStatus(await request("/api/pages/preview", "POST", { cancel: true }));
+  message("Prova annullata: il proiettore mostra di nuovo le pagine salvate");
 }));
 
 $("save-network").addEventListener("click", () => {
