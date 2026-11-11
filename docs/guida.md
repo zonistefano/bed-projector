@@ -94,7 +94,7 @@ Per installare senza HACS, copia **l'intera cartella** `custom_components/bed_pr
 
 ### Configurazione
 
-1. Se Home Assistant è sulla stessa rete, il proiettore acceso compare da solo in **Impostazioni → Dispositivi e servizi** come **Rilevato: Bed Projector**: premi **Aggiungi** e inserisci il token. Altrimenti apri **Aggiungi integrazione**, cerca **Bed Projector** e inserisci host/IP, porta `80` e token. Un errore indica se il dispositivo non risponde o se il token è sbagliato. Il proiettore è riconosciuto dal suo identificativo, non dall'indirizzo: se il router gli assegna un nuovo IP, Home Assistant aggiorna da solo la configurazione appena lo rileva di nuovo, e aggiungerlo una seconda volta non crea un doppione.
+1. Se Home Assistant è sulla stessa rete, il proiettore acceso compare da solo in **Impostazioni → Dispositivi e servizi** come **Rilevato: Bed Projector**: premi **Aggiungi** e inserisci il token. Altrimenti apri **Aggiungi integrazione**, cerca **Bed Projector** e inserisci host/IP, porta `80` e token. Un errore indica se il dispositivo non risponde o se il token è sbagliato. Il proiettore è riconosciuto dal suo identificativo, non dall'indirizzo: se il router gli assegna un nuovo IP, Home Assistant aggiorna da solo la configurazione appena lo rileva di nuovo, e aggiungerlo una seconda volta non crea un doppione. Se non vuoi che il proiettore venga proposto, togli la spunta a **Rilevamento automatico** nella sezione **Home Assistant** della web UI: l'effetto è immediato e resta ai riavvii. L'integrazione già configurata continua a funzionare, ma se l'IP cambia devi aggiornarlo a mano (conviene un indirizzo riservato nel router).
 2. Incolla il valore `API_TOKEN` del tuo `.env`. È lo stesso usato per accedere alla web UI; non serve abbinarne uno diverso. Se sei già autenticato nella web UI, puoi anche selezionarlo da **Home Assistant → Mostra e seleziona token**. Conservalo come una password.
 3. Apri **Configura** nelle opzioni dell'integrazione e scegli le entità da proiettare:
 
@@ -296,7 +296,7 @@ Il browser salva il token nel proprio archivio locale. **Rimuovi token da questo
 
 | Sintomo | Controllo e azione |
 | --- | --- |
-| Home Assistant non rileva il proiettore | Il rilevamento usa mDNS: Home Assistant deve stare sulla stessa rete (in Docker con `network_mode: host`) e il router non deve bloccare il multicast. Aggiungi l'integrazione a mano con l'IP. |
+| Home Assistant non rileva il proiettore | Controlla che **Rilevamento automatico** sia attivo nella web UI. Il rilevamento usa mDNS: Home Assistant deve stare sulla stessa rete (in Docker con `network_mode: host`) e il router non deve bloccare il multicast. Aggiungi l'integrazione a mano con l'IP. |
 | `bed-projector.local` non si apre | Trova l'IP nel router e prova `http://IP`. Verifica che il client sia sulla stessa rete e che non sia isolato dal Wi-Fi. |
 | Il dispositivo mostra `--:--` | Controlla Wi-Fi, DNS e accesso NTP a `pool.ntp.org`; attendi la sincronizzazione. |
 | Aperture, luci, allarme o meteo mostrano `?` | Configura le entità nelle opzioni HA, verifica che siano disponibili e che HA possa raggiungere l'IP del proiettore. Dopo 120 secondi senza snapshot i dati scadono. |

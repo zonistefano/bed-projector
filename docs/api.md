@@ -1,6 +1,6 @@
 # API locale
 
-Questa è l'API usata dalla [web UI e dal componente Home Assistant](guida.md). Con `WIFI_SSID` nel `.env`, il dispositivo si collega direttamente alla rete domestica e risponde su `http://bed-projector.local` oppure sul proprio IP, porta 80. Il router lo elenca con il nome host `bed-projector`. Via mDNS pubblica anche il servizio `_bed-projector._tcp`, con il campo TXT `id` uguale a quello di `/api/status`: Home Assistant lo usa per trovare il proiettore da solo. Se si avvia l'access point di recupero, usa `http://192.168.4.1` mentre il client è collegato a `bed-projector`.
+Questa è l'API usata dalla [web UI e dal componente Home Assistant](guida.md). Con `WIFI_SSID` nel `.env`, il dispositivo si collega direttamente alla rete domestica e risponde su `http://bed-projector.local` oppure sul proprio IP, porta 80. Il router lo elenca con il nome host `bed-projector`. Via mDNS pubblica anche il servizio `_bed-projector._tcp`, con il campo TXT `id` uguale a quello di `/api/status`: Home Assistant lo usa per trovare il proiettore da solo; con `discovery:false` (vedi [Rete, configurazione e OTA](#rete-configurazione-e-ota)) il servizio non viene pubblicato, mentre il nome `bed-projector.local` resta attivo. Se si avvia l'access point di recupero, usa `http://192.168.4.1` mentre il client è collegato a `bed-projector`.
 
 ## Autenticazione
 
@@ -34,7 +34,8 @@ Non pubblicare il token in script condivisi o log. Il firmware compilato contien
 | POST | `/api/calibration` | JSON regolazione | Stato della regolazione aggiornato |
 | POST | `/api/ha/state` | JSON snapshot completo | `{}` |
 | POST | `/api/message` | JSON messaggio | `{}` |
-| GET | `/api/config` | Nessuno | `{"timezone":"..."}` |
+| GET | `/api/config` | Nessuno | `{"timezone":"...","discovery":true}` |
+| POST | `/api/config` | `{"discovery":false}` | Attiva o disattiva il rilevamento da Home Assistant; risponde come `GET /api/config` |
 | POST | `/api/network` | JSON rete | `{"restarting":true}` |
 | POST | `/api/ota` | Binario firmware | `{"restarting":true}` |
 
@@ -317,7 +318,14 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
 
 ## Rete, configurazione e OTA
 
-`GET /api/config` restituisce il solo fuso orario. Per cambiare rete o fuso orario, invia **tutti e tre** i campi; SSID e password non possono essere letti dall'API:
+`GET /api/config` restituisce il fuso orario e `discovery`, cioè se il proiettore pubblica via mDNS il servizio `_bed-projector._tcp` usato da Home Assistant per rilevarlo (attivo di serie). `POST /api/config` con `{"discovery":true}` o `{"discovery":false}` lo cambia subito, senza riavvio, e lo salva. Con il rilevamento disattivato Home Assistant non propone il dispositivo e non ne aggiorna l'indirizzo se l'IP cambia; il nome `bed-projector.local` e il servizio `_http._tcp` restano pubblicati.
+
+```sh
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"discovery":false}' "$PROJECTOR_URL/api/config"
+```
+
+Per cambiare rete o fuso orario, invia **tutti e tre** i campi; SSID e password non possono essere letti dall'API:
 
 ```sh
 curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
