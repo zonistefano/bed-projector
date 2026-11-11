@@ -47,6 +47,7 @@ static int64_t preview_started_us;
 static char api_token[33];
 static char tz_value[128] = DEFAULT_TIMEZONE;
 static projector_calibration_t saved_calibration;
+static bool discovery = true; /* Advertise the _bed-projector service for Home Assistant. */
 
 /* Pages and theme as one document: what /api/pages reads and writes. */
 typedef struct {
@@ -136,6 +137,11 @@ static esp_err_t write_calibration(nvs_handle_t handle, const void *context)
     esp_err_t err = nvs_set_blob(handle, "proj_circle", geometry, sizeof(geometry));
     if (err == ESP_OK) err = nvs_set_u8(handle, "proj_orient", c->rotation | (c->mirror ? 4 : 0));
     return err;
+}
+
+static esp_err_t write_discovery(nvs_handle_t handle, const void *context)
+{
+    return nvs_set_u8(handle, "proj_discover", *(const bool *)context ? 1 : 0);
 }
 
 typedef struct {
@@ -474,6 +480,7 @@ static void load_presentation(nvs_handle_t handle)
     size = sizeof(tz_value);
     if (nvs_get_str(handle, "timezone", tz_value, &size) != ESP_OK || !tz_value[0])
         strcpy(tz_value, DEFAULT_TIMEZONE);
+    if (nvs_get_u8(handle, "proj_discover", &value) == ESP_OK) discovery = value != 0;
 }
 
 esp_err_t projector_init(void)
@@ -914,6 +921,30 @@ void projector_timezone(char *out, size_t size)
     xSemaphoreTake(lock, portMAX_DELAY);
     snprintf(out, size, "%s", tz_value);
     xSemaphoreGive(lock);
+}
+
+bool projector_discovery(void)
+{
+    xSemaphoreTake(lock, portMAX_DELAY);
+    bool enabled = discovery;
+    xSemaphoreGive(lock);
+    return enabled;
+}
+
+esp_err_t projector_set_config(const cJSON *root, char *error, size_t error_size)
+{
+    const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(root, "discovery");
+    if (!cJSON_IsBool(enabled)) {
+        snprintf(error, error_size, "discovery must be a boolean");
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool value = cJSON_IsTrue(enabled);
+    xSemaphoreTake(lock, portMAX_DELAY);
+    esp_err_t err = nvs_save(write_discovery, &value);
+    if (err == ESP_OK) discovery = value;
+    else snprintf(error, error_size, "NVS write failed");
+    xSemaphoreGive(lock);
+    return err;
 }
 
 /* ---- Calibration ---- */

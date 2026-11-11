@@ -170,4 +170,7 @@ void projector_set_wifi_connected(bool connected);
 void projector_read_network(char *ssid, size_t ssid_size, char *password, size_t password_size);
 esp_err_t projector_write_network(const char *ssid, const char *password, const char *timezone);
 void projector_timezone(char *out, size_t size);
+/* Whether Home Assistant may discover the projector via mDNS; saved in NVS. */
+bool projector_discovery(void);
+esp_err_t projector_set_config(const cJSON *root, char *error, size_t error_size);
 esp_err_t projector_set_calibration(const cJSON *root, char *error, size_t error_size);

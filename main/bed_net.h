@@ -10,3 +10,5 @@ bool bed_net_is_provisioning(void);
 bool bed_net_ap_credentials(const char **ssid, const char **password);
 /* Stable identifier (Wi-Fi MAC as 12 lowercase hex digits), set by bed_net_start(). */
 const char *bed_net_device_id(void);
+/* Publishes or withdraws the Home Assistant discovery service after projector_discovery() changes. */
+void bed_net_update_discovery(void);

@@ -202,7 +202,15 @@ static cJSON *config_json(void)
     projector_timezone(timezone, sizeof(timezone));
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "timezone", timezone);
+    cJSON_AddBoolToObject(root, "discovery", projector_discovery());
     return root;
+}
+
+static esp_err_t set_config(const cJSON *root, char *error, size_t error_size)
+{
+    esp_err_t err = projector_set_config(root, error, error_size);
+    if (err == ESP_OK) bed_net_update_discovery();
+    return err;
 }
 
 static esp_err_t set_network(const cJSON *root, char *error, size_t error_size)
@@ -322,7 +330,8 @@ esp_err_t bed_api_start(void)
     static const json_route_t calibration_post = {projector_set_calibration, calibration_json};
     static const json_route_t ha_state = {projector_set_ha_state, cJSON_CreateObject};
     static const json_route_t message = {projector_set_message, cJSON_CreateObject};
-    static const json_route_t config = {NULL, config_json};
+    static const json_route_t config_get = {NULL, config_json};
+    static const json_route_t config_post = {set_config, config_json};
     static const json_route_t network = {set_network, NULL};
     static const static_file_t html = {index_html_start, index_html_end, "text/html; charset=utf-8"};
     static const static_file_t js = {index_js_start, index_js_end, "text/javascript; charset=utf-8"};
@@ -342,7 +351,8 @@ esp_err_t bed_api_start(void)
         JSON("/api/calibration", HTTP_POST, calibration_post),
         JSON("/api/ha/state", HTTP_POST, ha_state),
         JSON("/api/message", HTTP_POST, message),
-        JSON("/api/config", HTTP_GET, config),
+        JSON("/api/config", HTTP_GET, config_get),
+        JSON("/api/config", HTTP_POST, config_post),
         JSON("/api/network", HTTP_POST, network),
         {.uri="/api/ota", .method=HTTP_POST, .handler=ota_handler},
         FILE_ROUTE("/", html),

@@ -18,6 +18,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "mdns.h"
 
 #define AP_SSID "bed-projector"
@@ -33,6 +34,8 @@ static unsigned reconnect_attempt;
 static atomic_bool provisioning;
 static bool has_credentials;
 static bool sntp_started;
+/* Guards mdns_started and the discovery service: the Wi-Fi event and HTTP tasks both change them. */
+static SemaphoreHandle_t mdns_lock;
 static bool mdns_started;
 static bool wifi_started;
 static bool ap_ready;
@@ -66,6 +69,27 @@ static void stop_recovery_ap(void)
     if (err != ESP_OK) ESP_LOGW(TAG, "Recovery AP stop failed: %s", esp_err_to_name(err));
 }
 
+/* Call with mdns_lock held. */
+static void publish_discovery(void)
+{
+    bool published = mdns_service_exists("_bed-projector", "_tcp", NULL);
+    if (projector_discovery() && !published) {
+        /* Home Assistant discovers this service; the id keeps the device recognisable
+         * when its address changes. */
+        mdns_txt_item_t txt[] = {{"id", device_id}};
+        mdns_service_add(NULL, "_bed-projector", "_tcp", 80, txt, 1);
+    } else if (!projector_discovery() && published) {
+        mdns_service_remove("_bed-projector", "_tcp");
+    }
+}
+
+void bed_net_update_discovery(void)
+{
+    xSemaphoreTake(mdns_lock, portMAX_DELAY);
+    if (mdns_started) publish_discovery();
+    xSemaphoreGive(mdns_lock);
+}
+
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg; (void)data;
@@ -92,16 +116,15 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
             esp_sntp_init();
             sntp_started = true;
         }
+        xSemaphoreTake(mdns_lock, portMAX_DELAY);
         if (!mdns_started && mdns_init() == ESP_OK) {
             mdns_hostname_set(HOSTNAME);
             mdns_instance_name_set("Bed Projector");
             mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-            /* Home Assistant discovers this service; the id keeps the device recognisable
-             * when its address changes. */
-            mdns_txt_item_t txt[] = {{"id", device_id}};
-            mdns_service_add(NULL, "_bed-projector", "_tcp", 80, txt, 1);
+            publish_discovery();
             mdns_started = true;
         }
+        xSemaphoreGive(mdns_lock);
     }
 }
 
@@ -141,7 +164,8 @@ esp_err_t bed_net_start(void)
     snprintf(device_id, sizeof(device_id), "%02x%02x%02x%02x%02x%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     wifi_events = xEventGroupCreate();
-    if (!wifi_events) return ESP_ERR_NO_MEM;
+    mdns_lock = xSemaphoreCreateMutex();
+    if (!wifi_events || !mdns_lock) return ESP_ERR_NO_MEM;
     const esp_timer_create_args_t timer = {.callback=reconnect, .name="wifi-reconnect"};
     ESP_RETURN_ON_ERROR(esp_timer_create(&timer, &reconnect_timer), TAG, "reconnect timer");
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif init");
