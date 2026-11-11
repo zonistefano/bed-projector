@@ -43,6 +43,7 @@
           "summary_today": "Today's weather summary (e.g. sensor.pirateweather_summary_0d)",
           "summary_tomorrow": "Tomorrow's weather summary (e.g. sensor.pirateweather_summary_1d)",
           "next_alarm": "Next alarm (timestamp sensor, e.g. sensor.phone_next_alarm, or input_datetime)",
+          "next_alarm_enabled": "Alarm enabled (optional: input_boolean telling whether the alarm rings)",
           "calendars": "Calendars for the Agenda page",
           "climate_heat": "Radiator thermostat (winter)",
           "climate_cool": "Air conditioner thermostat (summer)",

@@ -16,8 +16,8 @@ from homeassistant.helpers.template import Template
 
 from .const import (CONF_ALARM, CONF_CALENDARS, CONF_CLIMATE_COOL, CONF_CLIMATE_HEAT, CONF_EXTRAS,
                     CONF_INDOOR, CONF_LIGHT_LIST, CONF_LIGHT_TEMPLATE, CONF_NEXT_ALARM,
-                    CONF_OPENING_LIST, CONF_OPENING_TEMPLATE, CONF_OUTDOOR, CONF_SUMMARY_TODAY,
-                    CONF_SUMMARY_TOMORROW, CONF_TOKEN, CONF_WEATHER, DOMAIN)
+                    CONF_NEXT_ALARM_ENABLED, CONF_OPENING_LIST, CONF_OPENING_TEMPLATE, CONF_OUTDOOR,
+                    CONF_SUMMARY_TODAY, CONF_SUMMARY_TOMORROW, CONF_TOKEN, CONF_WEATHER, DOMAIN)
 
 # Options form: key, entity domain or domains (None = any; "template" = template field), multiple
 # entities.
@@ -28,7 +28,9 @@ OPTION_FIELDS = (
     (CONF_ALARM, "alarm_control_panel", False), (CONF_WEATHER, "weather", False),
     (CONF_INDOOR, "sensor", False), (CONF_OUTDOOR, "sensor", False),
     (CONF_SUMMARY_TODAY, "sensor", False), (CONF_SUMMARY_TOMORROW, "sensor", False),
-    (CONF_NEXT_ALARM, ["sensor", "input_datetime"], False), (CONF_CALENDARS, "calendar", True),
+    (CONF_NEXT_ALARM, ["sensor", "input_datetime"], False),
+    (CONF_NEXT_ALARM_ENABLED, ["input_boolean", "switch", "binary_sensor"], False),
+    (CONF_CALENDARS, "calendar", True),
     (CONF_CLIMATE_HEAT, "climate", False), (CONF_CLIMATE_COOL, "climate", False),
     *((key, None, False) for key in CONF_EXTRAS),
 )

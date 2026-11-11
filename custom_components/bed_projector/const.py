@@ -17,13 +17,16 @@ CONF_SUMMARY_TODAY = "summary_today"
 CONF_SUMMARY_TOMORROW = "summary_tomorrow"
 # Timestamp sensor of the next phone alarm, e.g. the Companion App's next_alarm.
 CONF_NEXT_ALARM = "next_alarm"
+# Optional on/off switch of that alarm: a time-only input_datetime always holds a value,
+# so whether it rings is decided by a separate input_boolean.
+CONF_NEXT_ALARM_ENABLED = "next_alarm_enabled"
 CONF_CALENDARS = "calendars"
 # Bedroom climate entities: the radiators in winter, the air conditioner in summer.
 CONF_CLIMATE_HEAT = "climate_heat"
 CONF_CLIMATE_COOL = "climate_cool"
 # Single entities forwarded to the display, in options form order.
 CONF_SINGLE = (CONF_ALARM, CONF_WEATHER, CONF_INDOOR, CONF_OUTDOOR,
-               CONF_SUMMARY_TODAY, CONF_SUMMARY_TOMORROW, CONF_NEXT_ALARM,
+               CONF_SUMMARY_TODAY, CONF_SUMMARY_TOMORROW, CONF_NEXT_ALARM, CONF_NEXT_ALARM_ENABLED,
                CONF_CLIMATE_HEAT, CONF_CLIMATE_COOL, *CONF_EXTRAS)
 # Contact sensor classes counted as doors and windows when no list is configured.
 OPENING_CLASSES = ("door", "window", "garage_door", "opening")

@@ -43,6 +43,7 @@
           "summary_today": "Riepilogo meteo di oggi (es. sensor.pirateweather_summary_0d)",
           "summary_tomorrow": "Riepilogo meteo di domani (es. sensor.pirateweather_summary_1d)",
           "next_alarm": "Prossima sveglia (sensore timestamp, es. sensor.telefono_next_alarm, oppure input_datetime)",
+          "next_alarm_enabled": "Sveglia attiva (facoltativo: input_boolean che dice se la sveglia suona)",
           "calendars": "Calendari per la pagina Agenda",
           "climate_heat": "Termostato caloriferi (inverno)",
           "climate_cool": "Termostato condizionatore (estate)",

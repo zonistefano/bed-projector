@@ -205,12 +205,25 @@ class AgendaTests(unittest.TestCase):
                          (False, None))
         self.assertEqual(protocol.wake_time(state("presto", **daily), NOW), (False, None))
 
+    def test_wake_time_enabled(self):
+        # The helper always holds a time: the on/off entity decides whether it rings.
+        alarm = state("06:45:00", has_date=False, has_time=True)
+        self.assertEqual(protocol.wake_time(alarm, NOW, state("on")),
+                         (True, {"date": "2026-10-11", "time": "06:45"}))
+        self.assertEqual(protocol.wake_time(alarm, NOW, state("off")), (True, None))
+        self.assertEqual(protocol.wake_time(alarm, NOW, state("unavailable")), (False, None))
+        self.assertEqual(protocol.wake_time(state("unavailable"), NOW, state("on")), (False, None))
+
     def test_snapshot_wake(self):
         options = {"next_alarm": "sensor.phone_next_alarm"}
         states = {"sensor.phone_next_alarm": state("2026-10-11T04:45:00+00:00")}
         result = protocol.make_snapshot(states, options, now=NOW)
         self.assertEqual((result["wake_known"], result["wake"]),
                          (True, {"date": "2026-10-11", "time": "06:45"}))
+        disabled = {**options, "next_alarm_enabled": "input_boolean.wake_enabled"}
+        off = {**states, "input_boolean.wake_enabled": state("off")}
+        result = protocol.make_snapshot(off, disabled, now=NOW)
+        self.assertEqual((result["wake_known"], result["wake"]), (True, None))
         self.assertEqual((result["events_known"], result["events"]), (False, []))
         result = protocol.make_snapshot({}, {}, now=NOW)
         self.assertEqual((result["wake_known"], result["wake"]), (False, None))

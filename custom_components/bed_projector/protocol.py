@@ -7,9 +7,9 @@ from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 from .const import (CONF_ALARM, CONF_CLIMATE_COOL, CONF_CLIMATE_HEAT, CONF_EXTRAS, CONF_INDOOR,
-                    CONF_NEXT_ALARM, CONF_OUTDOOR, CONF_SUMMARY_TODAY, CONF_SUMMARY_TOMORROW,
-                    CONF_WEATHER, MESSAGE_DURATION_DEFAULT, MESSAGE_DURATION_RANGE, MESSAGE_ICONS,
-                    SEASON_AUTO, SEASON_SUMMER, SEASON_WINTER)
+                    CONF_NEXT_ALARM, CONF_NEXT_ALARM_ENABLED, CONF_OUTDOOR, CONF_SUMMARY_TODAY,
+                    CONF_SUMMARY_TOMORROW, CONF_WEATHER, MESSAGE_DURATION_DEFAULT,
+                    MESSAGE_DURATION_RANGE, MESSAGE_ICONS, SEASON_AUTO, SEASON_SUMMER, SEASON_WINTER)
 
 WEATHER_CONDITIONS = {
     "clear-night", "cloudy", "exceptional", "fog", "hail", "lightning", "lightning-rainy",
@@ -204,14 +204,22 @@ def _alarm_moment(entity: Any, now: datetime) -> datetime | None:
     return when if when >= _minute(now) else when + timedelta(days=1)
 
 
-def wake_time(entity: Any, now: datetime) -> tuple[bool, dict[str, str] | None]:
+def wake_time(entity: Any, now: datetime,
+              enabled: Any = None) -> tuple[bool, dict[str, str] | None]:
     """(known, next alarm as HA local date and HH:MM or None) from a timestamp sensor or an
     input_datetime.
 
     A missing or unavailable entity is unknown; a past alarm or one beyond a week is none.
+    enabled is the optional on/off entity of the alarm: off means no alarm whatever time the
+    alarm entity holds, and an unusable state makes the alarm unknown.
     """
     if not available(entity):
         return False, None
+    if enabled is not None:
+        if enabled.state == "off":
+            return True, None
+        if enabled.state != "on":
+            return False, None
     when = _alarm_moment(entity, now)
     if when is None:
         return False, None
@@ -423,7 +431,8 @@ def make_snapshot(states: dict[str, Any], options: dict[str, Any], *,
         source = entity(key)
         return str(source.state) if available(source) else ""
 
-    wake_known, wake = wake_time(entity(CONF_NEXT_ALARM), now) if now is not None else (False, None)
+    wake_known, wake = (wake_time(entity(CONF_NEXT_ALARM), now, entity(CONF_NEXT_ALARM_ENABLED))
+                        if now is not None else (False, None))
     source = thermostat_source(states, options, season, today.month if today is not None else None)
     climate = None
     if source is not None:
