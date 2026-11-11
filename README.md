@@ -23,7 +23,8 @@ HACS installa e aggiorna solo l'integrazione Home Assistant. Il firmware ESP32 e
 
 ## Cosa puoi fare
 
-- Usare tre pagine con design dedicato e aggiungerne fino a cinque in totale, anche con il modello **Elenco** a tre widget (temperature, luci, alba e tramonto, sveglia, prossimo evento, fase lunare e altri). Sulle pagine secondarie una fila di quadratini indica la pagina mostrata. La pagina Ora resta sempre la prima.
+- Usare tre pagine con design dedicato e aggiungerne fino a cinque in totale, anche con il modello **Elenco** a quattro righe (temperature, luci, alba e tramonto, sveglia, prossimo evento, fase lunare e altri), ciascuna con etichetta, solo valore o icona. Sulle pagine secondarie una fila di quadratini indica la pagina mostrata. La pagina Ora resta sempre la prima.
+- Personalizzare dalla web UI l'aspetto (colori normali, una sola tinta o rosso notte, dimensione del testo per pagina) e, elemento per elemento, cosa mostra ogni pagina e come (per esempio solo icone, solo numeri, nomi, data breve), con una prova sul proiettore prima di salvare.
 - **Ora:** previsione (icona, massima e minima in grassetto; dalle 21 quella di domani), l'ora, icone di porte/finestre aperte, luci accese (esclusa la proiezione) e allarme inserito solo quando servono, una piccola icona che dice se domattina suona la sveglia, e una riga che scorre con data, alba e tramonto.
 - **Casa:** stato dell'allarme, temperatura della camera e quella esterna, nomi delle porte/finestre aperte e delle luci accese in righe che scorrono.
 - **Meteo:** condizioni attuali (temperatura, percepita, umidità, vento) e la giornata che ci aspetta divisa in giorno e sera, con probabilità di pioggia e riepilogo testuale.

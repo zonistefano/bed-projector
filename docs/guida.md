@@ -180,11 +180,13 @@ Home Assistant invia lo stato iniziale, i cambiamenti delle entità selezionate 
 
 Le pagine usano Montserrat (testo in SemiBold, temperature in Bold, con le lettere accentate) e le stesse Material Design Icons di Home Assistant. Ogni elemento è centrato nel cerchio di proiezione: i testi più lunghi dello spazio disponibile scorrono lentamente, quelli brevi si rimpiccioliscono invece di scorrere.
 
+Qui sotto ogni pagina è descritta con le impostazioni predefinite. Dalla web UI puoi cambiare colori e dimensione del testo e decidere, elemento per elemento, se e come mostrarlo: vedi [Modificare le pagine](#modificare-le-pagine).
+
 **Ora** (sempre la prima pagina), dall'alto:
 
-1. Icona della previsione, massima (arancione) e minima (azzurra) in grassetto. Fino alle 20:59 è la previsione di oggi, dalle 21:00 quella di domani. La riga manca se il meteo non è configurato o i dati sono scaduti.
+1. Icona della previsione, massima (arancione) e minima (azzurra) in grassetto. Fino alle 20:59 è la previsione di oggi, dalle 21:00 quella di domani (l'ora si cambia dalla web UI). La riga manca se il meteo non è configurato o i dati sono scaduti.
 2. L'ora.
-3. Icone di stato, solo quando servono: porta aperta con il numero di aperture, lampadina con il numero di luci accese, scudo dell'allarme se non è disinserito. In fondo, se è configurato il sensore della prossima sveglia, una piccola sveglia arancione indica che domattina suona una sveglia (prima delle 12:00), una sveglia barrata grigia che non ce n'è nessuna. Fino alle 11:59 «domattina» è la mattina in corso, da mezzogiorno quella del giorno dopo. Se il sensore non è configurato o non è disponibile l'icona non compare. Da **Proiezione → Sveglia nella pagina Ora** nella web UI si sceglie cosa mostrare: **Solo icona** (predefinito), **Icona e ora della sveglia** (`06:45`), **Icona e tempo mancante** (`7h 55m`, aggiornato ogni minuto) oppure **Niente**. Ora e tempo mancante compaiono solo accanto alla sveglia arancione; se la riga non entra nel cerchio, la sveglia passa su una riga sua e l'ora diventa un po' più piccola. Il tempo mancante si calcola sull'ora del muro, quindi la notte del cambio dell'ora legale è sbagliato di un'ora. La scelta resta salvata al riavvio.
+3. Icone di stato, solo quando servono: porta aperta con il numero di aperture, lampadina con il numero di luci accese, scudo dell'allarme se non è disinserito. In fondo, se è configurato il sensore della prossima sveglia, una piccola sveglia arancione indica che domattina suona una sveglia (prima delle 12:00), una sveglia barrata grigia che non ce n'è nessuna. Fino alle 11:59 «domattina» è la mattina in corso, da mezzogiorno quella del giorno dopo. Se il sensore non è configurato o non è disponibile l'icona non compare. Nell'elemento **Sveglia di domattina** della pagina Ora (web UI, **Pagine e aspetto**) si sceglie cosa mostrare: **Solo icona** (predefinito), **Icona e ora** (`06:45`), **Icona e tempo mancante** (`7h 55m`, aggiornato ogni minuto) oppure **Nascosto**. Ora e tempo mancante compaiono solo accanto alla sveglia arancione; se la riga non entra nel cerchio, la sveglia passa su una riga sua e l'ora diventa un po' più piccola. Il tempo mancante si calcola sull'ora del muro, quindi la notte del cambio dell'ora legale è sbagliato di un'ora. La scelta resta salvata al riavvio.
 4. Riga che scorre con la data (es. `Sab 10 Ottobre`), l'ora dell'alba e quella del tramonto.
 
 **Casa**: modalità dell'allarme con icona e nome, temperatura della camera (icona letto) e quella esterna (icona albero), poi una riga con i nomi delle porte/finestre aperte (`Finestra Sala · Finestra Cucina`, oppure **Tutto chiuso**) e una con i nomi delle luci accese (oppure **Luci spente**). Se gli elenchi superano otto nomi compare `+N`.
@@ -193,9 +195,9 @@ Le pagine usano Montserrat (testo in SemiBold, temperature in Bold, con le lette
 
 **Termostato**: una rotella di tacche, come la ghiera di un termostato, arancione per i caloriferi e azzurra per il condizionatore. Le tacche si colorano dall'inizio della scala fino alla temperatura impostata, segnata da una tacca più lunga; una tacca bianca indica la temperatura della stanza. La scala va normalmente da 10 a 30 °C, ristretta ai limiti del termostato e allargata se la temperatura impostata ne esce. Al centro, dall'alto: lo stato con la sua icona (**Riscalda**, **Raffresca**, **In pausa**, **Deumidifica**, **Ventilazione**…, seguito dal preset, per esempio `Eco`), la temperatura impostata in grande e, con l'icona del termometro, quella della stanza; in basso, nello spazio libero della rotella, l'umidità se il termostato la fornisce. Quando il termostato lavora la rotella è accesa, in pausa è più tenue. Da spento compaiono **Spento**, la temperatura della stanza in grigio e il nome dell'apparecchio (**Caloriferi** o **Condizionatore**). Se il termostato non è configurato, non è disponibile o i dati sono scaduti compaiono **Clima ?** e `--°`.
 
-Sulle pagine diverse da Ora, una fila di quadratini in basso indica quante pagine ci sono e quale è mostrata (quella chiara).
+Sulle pagine diverse da Ora, una fila di quadratini in basso indica quante pagine ci sono e quale è mostrata (quella chiara). Si possono togliere dal tema.
 
-**Meteo**: icona e temperatura attuali, una riga che scorre con condizione, temperatura percepita, umidità e vento; sotto il titolo **OGGI** (o **DOMANI** dalle 21:00) le colonne **Giorno** e **Sera** con icona e temperatura; in fondo, a scorrimento, probabilità di pioggia (quando è almeno 10%) e il riepilogo della giornata.
+**Meteo**: icona e temperatura attuali, una riga che scorre con condizione, temperatura percepita, umidità e vento; sotto il titolo **OGGI** (o **DOMANI** dalle 21:00, ora regolabile) le colonne **Giorno** e **Sera** con icona e temperatura; in fondo, a scorrimento, probabilità di pioggia (quando è almeno 10%) e il riepilogo della giornata.
 
 | Indicazione | Significato |
 | --- | --- |
@@ -227,28 +229,52 @@ Il diametro iniziale è 112 pixel, centrato su (64, 64); puoi impostarlo tra 80 
 
 ### Modificare le pagine
 
-Apri **Pagine** nella web UI. Puoi rinominare le pagine, scegliere il modello delle pagine secondarie, spostarle con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine: fino ad allora le modifiche restano una bozza, che non va persa se nel frattempo usi gli altri comandi della pagina. Un nome vuoto o troppo lungo viene segnalato prima dell'invio.
+Apri **Pagine e aspetto** nella web UI. Puoi rinominare le pagine, scegliere il modello delle pagine secondarie, spostarle con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine: fino ad allora le modifiche restano una bozza, che non va persa se nel frattempo usi gli altri comandi della pagina. Un nome o un testo troppo lungo viene segnalato prima dell'invio.
 
-La pagina Ora resta prima. Le altre usano il modello **Casa**, **Meteo**, **Agenda**, **Termostato** (design fissi descritti sopra) o **Elenco**, che mostra il nome della pagina e fino a tre widget:
+**Provare prima di salvare.** Ogni pagina ha il pulsante **Prova sul proiettore**: il proiettore mostra subito la bozza (tema compreso) aperta su quella pagina, senza salvarla e senza tornare alla pagina Ora. Puoi cambiare ancora e premere di nuovo **Prova**. **Salva pagine** rende definitiva la bozza; **Annulla prova** torna alla configurazione salvata, e lo stesso succede da solo dopo 2 minuti o con un riavvio.
 
-| Widget (nome nella web UI) | Contenuto |
+**Tema**, comune a tutte le pagine:
+
+- **Colori**: **Normali**, **Una sola tinta** (ogni colore diventa più o meno luminoso nella tinta scelta, per esempio un azzurro o un ambra tenue) o **Rosso notte**, che disturba meno gli occhi abituati al buio. Il tema vale anche per i messaggi e la schermata dell'access point.
+- **Puntini delle pagine**: mostra o nasconde i quadratini in basso.
+
+Per **ogni pagina**:
+
+- **Dimensione testo**: **Normale**, **Piccolo** o **Grande**. Il proiettore sceglie già i caratteri in base al diametro del cerchio; questa scelta li sposta di un passo. Su un cerchio piccolo **Grande** può far scorrere le righe lunghe o avvicinarle al bordo: provala sul proiettore.
+- **Previsione di domani dalle ore** (solo Ora e Meteo): da 0 a 24, predefinito 21; con 24 la previsione resta sempre quella di oggi.
+- **Elementi**: un menu per ogni elemento del modello. Quando un elemento è nascosto, gli altri si ricentrano nel cerchio.
+
+| Modello | Elementi e scelte (la prima è quella predefinita) |
 | --- | --- |
-| **Porte/finestre aperte** (`openings`) | Conteggio porte/finestre aperte |
-| **Allarme** (`alarm`) | Stato della centrale |
-| **Data** (`date`) | Data locale |
-| **Meteo attuale** (`weather`) | Condizione in italiano e temperatura da HA |
-| **Dato HA 1–4** (`entity1`–`entity4`) | Dati aggiuntivi scelti nelle opzioni HA |
-| **Testo libero** (`text`) | Testo statico inserito nel campo **Testo** della pagina |
-| **Temperatura camera** (`indoor`) | `Camera 21.5°` |
-| **Temperatura esterna** (`outdoor`) | `Esterno 17.3°` |
-| **Luci accese** (`lights`) | Conteggio luci accese |
-| **Alba e tramonto** (`sun`) | Orari di oggi calcolati da HA |
-| **Prossima sveglia** (`wake`) | `Sveglia domani 06:45`, oppure **Nessuna sveglia** |
-| **Prossimo evento** (`event`) | Primo evento del calendario, oppure **Nessun evento** |
-| **Fase lunare** (`moon`) | Calcolata dal proiettore, non serve HA |
-| **Termostato** (`thermostat`) | `Termostato 21.5°, camera 19.3°`, oppure **Termostato spento** |
+| **Ora** | **Previsione**: icona e temperature, solo temperature, solo icona, nascosta · **Porte e finestre aperte** e **Luci accese**: icona e numero, solo icona, nascoste · **Allarme inserito**: icona, nascosto · **Sveglia di domattina**: solo icona, icona e ora, icona e tempo mancante, nascosta · **Data**: completa (`Sab 10 Ottobre`), breve (`Sab 10`), nascosta · **Alba e tramonto**: visibili, nascosti |
+| **Casa** | **Allarme**: icona e stato, solo stato, solo icona, nascosto · **Temperature camera ed esterno**: con icone, solo valori, nascoste · **Porte e finestre**: nomi di quelle aperte, solo quante (`2 aperte`), nascoste · **Luci**: nomi di quelle accese, solo quante (`3 accese`), nascoste |
+| **Meteo** | **Adesso**: icona e temperatura, solo temperatura, solo icona · **Dettagli**: condizione, percepita, umidità e vento, solo condizione, nascosti · **Giorno e sera**, **Probabilità di pioggia**, **Riepilogo della giornata**: visibili o nascosti |
+| **Agenda** | **Sveglia**: ora e giorno, solo ora, nascosta · **Eventi**: fino a 3, fino a 2, solo il prossimo, nascosti · **Quando inizia l'evento**: visibile o nascosto |
+| **Termostato** | **Rotella** (senza, il testo usa tutto il cerchio), **Preset**, **Temperatura della stanza**, **Umidità**: visibili o nascosti · **Stato**: icona e stato, solo stato, solo icona, nascosto |
+| **Elenco** | **Intestazione con il nome**: visibile o nascosta |
 
-Le pagine preconfigurate sono **Ora**, **Casa** e **Meteo**. Le pagine con modello `home`, `weather`, `agenda` e `climate` hanno un design fisso e ignorano i widget. Il nome della pagina è lungo al massimo 16 byte e il testo statico 32 byte: con caratteri accentati il limite in caratteri può essere inferiore.
+Un dato sconosciuto resta riconoscibile in ogni scelta: per esempio, con **Solo icona** la porta grigia mostra comunque il `?`.
+
+**Elenco** mostra fino a quattro righe. Per ognuna scegli il dato e **Come** mostrarlo: **Etichetta e valore** (`Luci accese: 3`), **Solo valore** (`3`) o **Icona e valore** (lampadina e `3`). Con quattro righe gli spazi tra le righe si riducono.
+
+| Dato (nome nella web UI) | Etichetta e valore | Icona |
+| --- | --- | --- |
+| **Porte/finestre aperte** (`openings`) | `Porte/finestre: 2` | Porta aperta o chiusa |
+| **Allarme** (`alarm`) | `Allarme: Notte` | Quella della modalità |
+| **Data** (`date`) | `Sab 10 Ottobre` | Calendario |
+| **Meteo attuale** (`weather`) | `Poco nuvoloso 17°C` | Quella della condizione |
+| **Dato HA 1–4** (`entity1`–`entity4`) | Dati aggiuntivi scelti nelle opzioni HA | Nessuna |
+| **Testo libero** (`text`) | Il testo scritto nel campo **Testo** della riga | Nessuna |
+| **Temperatura camera** (`indoor`) | `Camera 21.5°` | Letto |
+| **Temperatura esterna** (`outdoor`) | `Esterno 17.3°` | Albero |
+| **Luci accese** (`lights`) | `Luci accese: 3` | Lampadina |
+| **Alba e tramonto** (`sun`) | `Alba 07:33 · Tramonto 18:47` | Alba |
+| **Prossima sveglia** (`wake`) | `Sveglia domani 06:45`, oppure **Nessuna sveglia** | Sveglia |
+| **Prossimo evento** (`event`) | Primo evento del calendario, oppure **Nessun evento** | Calendario |
+| **Fase lunare** (`moon`) | Calcolata dal proiettore, non serve HA | Luna |
+| **Termostato** (`thermostat`) | `Termostato 21.5°, camera 19.3°`, oppure **Termostato spento** | Calorifero o condizionatore |
+
+Le pagine preconfigurate sono **Ora**, **Casa** e **Meteo**. Il nome della pagina è lungo al massimo 16 byte e ogni testo libero 32 byte: con caratteri accentati il limite in caratteri può essere inferiore.
 
 L'ordine delle pagine definisce **precedente/successiva**. Selezionando una pagina secondaria da web UI o HA, la pagina Ora torna automaticamente dopo il tempo impostato in **Proiezione → Ritorno alla pagina Ora** (web UI) o con l'entità **Ritorno alla pagina Ora** (HA): da 5 a 3600 secondi, predefinito 30; con `0` la pagina scelta resta visibile. Il tempo resta salvato al riavvio, la pagina scelta no.
 

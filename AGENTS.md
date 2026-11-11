@@ -18,7 +18,7 @@ Mappa del firmware:
 | --- | --- |
 | `main.c` | Avvio: NVS, stato, display, rete, API, conferma OTA |
 | `projector.c/.h` | Stato condiviso (mutex), validazione JSON, persistenza NVS |
-| `projector_logic.c/.h` | Logica pura senza ESP-IDF, testata su host |
+| `projector_logic.c/.h` | Logica pura senza ESP-IDF, testata su host; schema di pagine, elementi, modi e widget |
 | `bed_api.c` | Server HTTP, autenticazione, OTA, file statici |
 | `bed_net.c` | Wi-Fi STA, AP di recupero, SNTP, mDNS |
 | `bed_display.c` | LCD, LED, task che renderizza solo quando qualcosa cambia |
@@ -97,7 +97,9 @@ La CI (`.github/workflows/ci.yml`) esegue test, sintassi e `idf.py build` con ES
 
 **Aggiungere un endpoint**: un `json_route_t` con `set` (applica il JSON) e `respond` (costruisce la risposta) e una riga in `routes[]` di `bed_api_start()`. `max_uri_handlers` si adegua da solo.
 
-**Aggiungere un widget del modello Elenco**: nome in `widgets[]` (`projector.c`), testo in `text_widget()` (`bed_ui.c`), etichetta in `widgetLabels` (`index.js`) e tabella in `docs/guida.md`.
+**Aggiungere un widget del modello Elenco**: valore in fondo all'enum `WIDGET_*` e nome in `projector_widgets[]` (`projector_logic.c/.h`), etichetta, valore e icona in `text_widget()` (`bed_ui.c`), etichetta in `widgetLabels` (`index.js`) e tabella in `docs/guida.md`.
+
+**Aggiungere un elemento o una modalità a una pagina**: lo schema sta in `projector_logic.c/.h` (enum degli elementi e dei modi, tabelle `*_elements[]`); la modalità di indice 0 è sempre la predefinita, così una pagina azzerata resta com'era. Al massimo `PROJECTOR_MAX_ELEMENTS` elementi per modello. Poi il rendering in `bed_ui.c` (letto da `page->show[...]`), lo stesso schema con le etichette in `layoutElements` (`index.js`, stesso ordine), uno scenario in `tools/preview/preview.c` e le tabelle in `docs/api.md` e `docs/guida.md`.
 
 **Cambiare l'aspetto delle pagine**: esegui `tools/render_preview.py` prima e dopo, e confronta le PNG (o i `.rgb565` con `cmp`) per verificare che cambi solo ciò che volevi.
 

@@ -26,8 +26,9 @@ Non pubblicare il token in script condivisi o log. Il firmware compilato contien
 | --- | --- | --- | --- |
 | GET | `/api/pair` | Nessuno | `{"token":"..."}`; solo da AP |
 | GET | `/api/status` | Nessuno | Stato del dispositivo e dati HA |
-| GET | `/api/pages` | Nessuno | Configurazione di tutte le pagine |
+| GET | `/api/pages` | Nessuno | Tema e configurazione di tutte le pagine |
 | PUT | `/api/pages` | JSON pagine | Configurazione salvata |
+| POST | `/api/pages/preview` | JSON pagine e `page`, oppure `{"cancel":true}` | Stato del dispositivo |
 | POST | `/api/display` | JSON comando | Stato aggiornato |
 | GET | `/api/calibration` | Nessuno | Centro, diametro, orientamento e modalità di regolazione |
 | POST | `/api/calibration` | JSON regolazione | Stato della regolazione aggiornato |
@@ -55,7 +56,7 @@ Esempio di risposta:
   "page": "clock",
   "page_index": 0,
   "page_timeout": 30,
-  "wake_display": "icon",
+  "preview": false,
   "ha_fresh": false,
   "openings": null,
   "lights": null,
@@ -68,11 +69,11 @@ Esempio di risposta:
 }
 ```
 
-`id` è l'indirizzo MAC Wi-Fi in 12 cifre esadecimali minuscole: non cambia mai e identifica il proiettore anche quando cambia IP. `openings:null` e `lights:null` significano conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
+`id` è l'indirizzo MAC Wi-Fi in 12 cifre esadecimali minuscole: non cambia mai e identifica il proiettore anche quando cambia IP. `openings:null` e `lights:null` significano conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `preview:true` indica che il proiettore mostra una prova di pagine non salvata (vedi [Prova delle pagine](#prova-delle-pagine)). `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
 
 ## Comandi del display
 
-`POST /api/display` accetta `power`, `brightness`, `page_timeout`, `wake_display` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
+`POST /api/display` accetta `power`, `brightness`, `page_timeout` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
 
 ```sh
 # Spegni solo il LED di proiezione.
@@ -97,13 +98,6 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
   -d '{"page_timeout":60}' "$PROJECTOR_URL/api/display"
 ```
 
-`wake_display` sceglie cosa mostra la pagina Ora della sveglia di domattina: `icon` (solo l'icona, predefinito), `time` (icona e ora della sveglia), `countdown` (icona e tempo mancante, per esempio `7h 55m`) o `none` (niente). Resta salvato al riavvio ed è riportato da `GET /api/status`.
-
-```sh
-curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"wake_display":"countdown"}' "$PROJECTOR_URL/api/display"
-```
-
 ## Centraggio e orientamento locali
 
 `GET /api/calibration` restituisce `{"center_x":64,"center_y":64,"diameter":112,"rotation":0,"mirror":false,"active":false}` per la geometria iniziale. La web UI usa questo endpoint; l'integrazione Home Assistant non lo usa.
@@ -112,16 +106,33 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
 
 ## Pagine
 
-`GET /api/pages` restituisce un oggetto con l'array `pages`. `PUT /api/pages` sostituisce e salva l'intero array. Esempio corrispondente alla configurazione iniziale:
+`GET /api/pages` restituisce il documento salvato: il tema comune e l'array `pages`, con ogni elemento esplicitato. `PUT /api/pages` sostituisce e salva l'intero documento. Esempio corrispondente alla configurazione iniziale:
 
 ```json
 {
+  "theme": {"palette": "color", "tint": "#ffb36b", "dots": true},
   "pages": [
-    {"id":"clock","name":"Ora","layout":"clock","widgets":[],"text":""},
-    {"id":"home","name":"Casa","layout":"home","widgets":[],"text":""},
-    {"id":"weather","name":"Meteo","layout":"weather","widgets":[],"text":""}
+    {"id": "clock", "name": "Ora", "layout": "clock", "size": "normal", "tomorrow_from": 21,
+     "show": {"forecast": "icon_temps", "openings": "count", "lights": "count", "alarm": "icon",
+              "wake": "icon", "date": "full", "sun": "on"}},
+    {"id": "home", "name": "Casa", "layout": "home", "size": "normal",
+     "show": {"alarm": "icon_label", "temperatures": "icons", "openings": "names", "lights": "names"}},
+    {"id": "weather", "name": "Meteo", "layout": "weather", "size": "normal", "tomorrow_from": 21,
+     "show": {"now": "icon_temp", "details": "full", "periods": "on", "rain": "on", "summary": "on"}}
   ]
 }
+```
+
+Una pagina Elenco con quattro righe:
+
+```json
+{"id": "notte", "name": "Notte", "layout": "list", "size": "large", "show": {"header": "off"},
+ "widgets": [
+   {"widget": "indoor", "style": "icon_value"},
+   {"widget": "lights", "style": "value"},
+   {"widget": "wake", "style": "label_value"},
+   {"widget": "text", "style": "value", "text": "Buonanotte"}
+ ]}
 ```
 
 ```sh
@@ -130,14 +141,78 @@ curl -X PUT -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: applic
   --data-binary @pages.json "$PROJECTOR_URL/api/pages"
 ```
 
-Regole di validazione:
+### Tema
 
-- Da 1 a 5 pagine con ID univoci alfanumerici o `_`, lunghi fino a 16 byte. L'ordine dell'array è l'ordine della navigazione.
-- La prima pagina deve avere `id:"clock"` e `layout:"clock"`; nessun'altra pagina può usarli.
-- Le altre pagine usano `layout:"home"`, `layout:"weather"`, `layout:"agenda"`, `layout:"climate"` (termostato) o `layout:"list"`. Ogni pagina accetta al massimo tre widget tra `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`, `indoor`, `outdoor`, `lights`, `sun`, `wake`, `event`, `moon`, `thermostat`, ma solo `list` li mostra: `clock`, `home`, `weather`, `agenda` e `climate` hanno un design fisso e li ignorano.
-- `name` è lungo al massimo 16 byte, `text` al massimo 32 byte. Il widget `text` mostra il testo della propria pagina.
+`theme` è facoltativo; i campi assenti prendono il valore predefinito.
 
-Un JSON non valido viene rifiutato senza cambiare le pagine. Se il salvataggio NVS fallisce, il firmware ripristina in RAM la configurazione precedente e risponde con un errore.
+| Campo | Valori | Predefinito |
+| --- | --- | --- |
+| `palette` | `color` (colori normali), `mono` (ogni colore diventa la sua luminosità nella tinta `tint`), `red` (lo stesso in rosso, meno abbagliante di notte) | `color` |
+| `tint` | Colore `#rrggbb`, usato da `mono` | `#ffb36b` |
+| `dots` | Quadratini delle pagine in basso sulle pagine secondarie | `true` |
+
+Il tema vale per tutte le pagine, per i messaggi e per la schermata dell'access point, non per la croce di calibrazione.
+
+### Campi di una pagina
+
+| Campo | Valori |
+| --- | --- |
+| `id` | Alfanumerico o `_`, 1–16 byte, univoco |
+| `name` | 1–16 byte, senza caratteri di controllo |
+| `layout` | `clock` (solo la prima pagina, con `id:"clock"`), `home`, `weather`, `agenda`, `climate` (termostato), `list` |
+| `size` | Dimensione del testo: `normal` (predefinito), `small`, `large`. Sui cerchi più piccoli `large` può far scorrere le righe lunghe |
+| `tomorrow_from` | Solo `clock` e `weather`: ora (0–24) da cui si mostra la previsione di domani; `24` = mai, predefinito `21`. Accettato e ignorato sulle altre pagine |
+| `show` | Modo di mostrare ogni elemento del modello (tabella sotto). Gli elementi assenti prendono il primo modo, quello predefinito |
+| `widgets` | Solo `list`: fino a 4 righe `{"widget", "style", "text"}`. Le altre pagine accettano solo un array vuoto o nessun campo |
+
+Elementi di `show` per modello; il primo modo è il predefinito:
+
+| Modello | Elemento | Modi |
+| --- | --- | --- |
+| `clock` | `forecast` | `icon_temps`, `temps`, `icon`, `off` |
+| | `openings` | `count` (icona e numero), `icon`, `off`. Un conteggio sconosciuto mostra sempre `?` |
+| | `lights` | `count`, `icon`, `off` |
+| | `alarm` | `icon`, `off` |
+| | `wake` | `icon`, `time` (icona e ora), `countdown` (icona e tempo mancante, es. `7h 55m`), `off` |
+| | `date` | `full` (`Sab 10 Ottobre`), `short` (`Sab 10`), `off` |
+| | `sun` | `on`, `off` (alba e tramonto nella riga della data) |
+| `home` | `alarm` | `icon_label`, `label`, `icon`, `off` |
+| | `temperatures` | `icons`, `values`, `off` |
+| | `openings` | `names`, `count` (`2 aperte`), `off` |
+| | `lights` | `names`, `count` (`3 accese`), `off` |
+| `weather` | `now` | `icon_temp`, `temp`, `icon` |
+| | `details` | `full` (condizione, percepita, umidità, vento), `condition`, `off` |
+| | `periods` | `on`, `off` (titolo OGGI/DOMANI e colonne Giorno e Sera) |
+| | `rain` | `on`, `off` (probabilità di pioggia nella riga in fondo) |
+| | `summary` | `on`, `off` (riepilogo nella riga in fondo) |
+| `agenda` | `wake` | `time_day`, `time`, `off` |
+| | `events` | `3`, `2`, `1`, `off` (quanti eventi al massimo) |
+| | `event_time` | `on`, `off` (quando inizia ciascun evento) |
+| `climate` | `dial` | `on`, `off` (senza rotella il testo usa tutto il cerchio) |
+| | `status` | `icon_label`, `label`, `icon`, `off` |
+| | `preset` | `on`, `off` |
+| | `current` | `on`, `off` (temperatura della stanza) |
+| | `humidity` | `on`, `off` |
+| `list` | `header` | `on`, `off` (nome della pagina in alto) |
+
+Righe di `widgets`:
+
+- `widget`: `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`, `indoor`, `outdoor`, `lights`, `sun`, `wake`, `event`, `moon`, `thermostat`.
+- `style`: `label_value` (predefinito, es. `Luci accese: 3`), `value` (solo `3`), `icon_value` (icona e valore; `text` ed `entity1`–`entity4` non hanno icona e mostrano solo il valore).
+- `text`: solo per `widget:"text"`, al massimo 32 byte; sulle altre righe viene ignorato.
+
+Un JSON non valido viene rifiutato per intero senza cambiare le pagine. Il documento salvato, in forma compatta, deve stare in 4000 byte (una configurazione completa di cinque pagine ne occupa circa la metà). Se il salvataggio NVS fallisce, la configurazione mostrata resta quella di prima e la risposta è un errore.
+
+### Prova delle pagine
+
+`POST /api/pages/preview` mostra un documento come quello di `PUT /api/pages` senza salvarlo; il campo facoltativo `page` indica quale pagina portare in primo piano. Durante la prova il ritorno automatico alla pagina Ora è sospeso, `GET /api/pages` continua a restituire la configurazione salvata e `GET /api/status` riporta `preview:true`. La prova finisce con `PUT /api/pages`, con `{"cancel":true}` (che ripristina la configurazione salvata) oppure da sola dopo 2 minuti. Si perde anche al riavvio.
+
+```sh
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  --data-binary @bozza.json "$PROJECTOR_URL/api/pages/preview"
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"cancel":true}' "$PROJECTOR_URL/api/pages/preview"
+```
 
 ## Snapshot da Home Assistant
 
