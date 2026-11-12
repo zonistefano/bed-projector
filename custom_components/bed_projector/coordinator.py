@@ -97,6 +97,15 @@ class ProjectorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except UpdateFailed as error:
             raise HomeAssistantError(f"Bed Projector: {error}") from error
 
+    async def wake(self, payload: dict) -> None:
+        """Act on the alarm under way from a user action; failures reach the user."""
+        try:
+            wake = await self.request("POST", "/api/wake", payload)
+        except UpdateFailed as error:
+            raise HomeAssistantError(f"Bed Projector: {error}") from error
+        if self.data is not None:
+            self.async_set_updated_data({**self.data, "wake_phase": wake.get("phase")})
+
     def page_labels(self) -> dict[str, str]:
         """Page id -> name shown to the user; ids stand in for duplicate names."""
         pages = (self.data or {}).get("pages", [])

@@ -77,7 +77,15 @@
         },
         "duration": {
           "name": "Durata",
-          "description": "Secondi prima che il messaggio scompaia (5-3600)."
+          "description": "Secondi prima che il messaggio scompaia: 5-3600, oppure 0 per lasciarlo finché non viene tolto."
+        },
+        "level": {
+          "name": "Livello",
+          "description": "Colore dell'icona; senza icona scelta, avviso e allarme mostrano un triangolo. Un allarme ha anche il testo rosso."
+        },
+        "blink": {
+          "name": "Lampeggio",
+          "description": "La proiezione pulsa per il primo minuto, anche se è spenta."
         }
       }
     },
@@ -105,6 +113,13 @@
         "phone": "Telefono",
         "alarm": "Sveglia",
         "calendar": "Calendario"
+      }
+    },
+    "level": {
+      "options": {
+        "info": "Informazione",
+        "warning": "Avviso",
+        "alert": "Allarme"
       }
     }
   }

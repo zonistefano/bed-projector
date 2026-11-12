@@ -77,7 +77,15 @@
         },
         "duration": {
           "name": "Duration",
-          "description": "Seconds before the message disappears (5-3600)."
+          "description": "Seconds before the message disappears: 5-3600, or 0 to keep it until cleared."
+        },
+        "level": {
+          "name": "Level",
+          "description": "Icon colour; without a chosen icon, warnings and alerts show a triangle. An alert also has red text."
+        },
+        "blink": {
+          "name": "Blink",
+          "description": "The projection pulses for the first minute, even when it is off."
         }
       }
     },
@@ -105,6 +113,13 @@
         "phone": "Phone",
         "alarm": "Alarm clock",
         "calendar": "Calendar"
+      }
+    },
+    "level": {
+      "options": {
+        "info": "Information",
+        "warning": "Warning",
+        "alert": "Alert"
       }
     }
   }

@@ -32,11 +32,17 @@ CONF_SINGLE = (CONF_ALARM, CONF_WEATHER, CONF_INDOOR, CONF_OUTDOOR,
 OPENING_CLASSES = ("door", "window", "garage_door", "opening")
 # Page timeout accepted by the firmware: 0 (never) or this range in seconds.
 PAGE_TIMEOUT_RANGE = (5, 3600)
+# Seconds per page of the automatic page rotation: 0 (off) or this range.
+CAROUSEL_RANGE = (5, 600)
 # Message icons the firmware draws (main/projector.c message_icons) and duration in seconds.
 MESSAGE_ICONS = ("bell", "information", "alert", "washing-machine", "package-variant", "door-open",
                  "lightbulb-on", "phone", "alarm", "calendar")
+# 0 keeps the message until it is cleared.
 MESSAGE_DURATION_RANGE = (5, 3600)
 MESSAGE_DURATION_DEFAULT = 30
+# Message levels (main/projector_logic.c projector_message_levels): icon colour, red text for alerts.
+MESSAGE_LEVELS = ("info", "warning", "alert")
+MESSAGE_LEVEL_DEFAULT = "info"
 # Which climate entity the thermostat page shows: chosen automatically, the radiators or the
 # air conditioner.
 SEASON_AUTO = "auto"

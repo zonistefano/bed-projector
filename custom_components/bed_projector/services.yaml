@@ -29,9 +29,22 @@ show_message:
       default: 30
       selector:
         number:
-          min: 5
+          min: 0
           max: 3600
           unit_of_measurement: s
+    level:
+      default: info
+      selector:
+        select:
+          translation_key: level
+          options:
+            - "info"
+            - "warning"
+            - "alert"
+    blink:
+      default: false
+      selector:
+        boolean:
 clear_message:
   fields:
     config_entry_id:

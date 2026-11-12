@@ -347,9 +347,21 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(protocol.message_payload(" Ciao "), {"text": "Ciao", "duration": 30})
         self.assertLessEqual(len(protocol.message_payload("è" * 50)["text"].encode()), 63)
         self.assertEqual(protocol.message_payload("#ff0000 Rosso#")["text"], "ff0000 Rosso")
-        for args in (("",), ("  ",), ("#",), ("Ciao", "unicorn"), ("Ciao", None, 4), ("Ciao", None, 3601)):
+        self.assertEqual(protocol.message_payload("Fumo", None, 0, "alert", True),
+                         {"text": "Fumo", "duration": 0, "level": "alert", "blink": True})
+        self.assertEqual(protocol.message_payload("Pacco", None, 60, "warning"),
+                         {"text": "Pacco", "duration": 60, "level": "warning"})
+        for args in (("",), ("  ",), ("#",), ("Ciao", "unicorn"), ("Ciao", None, 4), ("Ciao", None, 3601),
+                     ("Ciao", None, 30, "panic")):
             with self.assertRaises(ValueError):
                 protocol.message_payload(*args)
+
+    def test_levels_match_firmware(self):
+        import re
+        source = (Path(__file__).resolve().parents[1] / "main/projector_logic.c").read_text()
+        block = re.search(r"projector_message_levels\[MESSAGE_LEVEL_COUNT\] = \{(.*?)\};", source, re.S).group(1)
+        const = importlib.import_module("bed_projector.const")
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', block)), const.MESSAGE_LEVELS)
 
 
 if __name__ == "__main__":

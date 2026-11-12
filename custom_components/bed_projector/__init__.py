@@ -15,7 +15,7 @@ from homeassistant.helpers.event import (TrackTemplate, async_track_state_change
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (DOMAIN, MESSAGE_DURATION_DEFAULT, MESSAGE_DURATION_RANGE, MESSAGE_ICONS,
-                    PLATFORMS)
+                    MESSAGE_LEVEL_DEFAULT, MESSAGE_LEVELS, PLATFORMS)
 from .coordinator import ProjectorCoordinator
 from .protocol import message_payload
 
@@ -29,12 +29,17 @@ ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_MESSAGE = "message"
 ATTR_ICON = "icon"
 ATTR_DURATION = "duration"
+ATTR_LEVEL = "level"
+ATTR_BLINK = "blink"
 SHOW_MESSAGE_SCHEMA = vol.Schema({
     vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string,
     vol.Required(ATTR_MESSAGE): cv.string,
     vol.Optional(ATTR_ICON): vol.In(MESSAGE_ICONS),
+    # 0 keeps the message until clear_message.
     vol.Optional(ATTR_DURATION, default=MESSAGE_DURATION_DEFAULT):
-        vol.All(vol.Coerce(int), vol.Range(*MESSAGE_DURATION_RANGE)),
+        vol.All(vol.Coerce(int), vol.Any(0, vol.Range(*MESSAGE_DURATION_RANGE))),
+    vol.Optional(ATTR_LEVEL, default=MESSAGE_LEVEL_DEFAULT): vol.In(MESSAGE_LEVELS),
+    vol.Optional(ATTR_BLINK, default=False): cv.boolean,
 })
 CLEAR_MESSAGE_SCHEMA = vol.Schema({vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string})
 
@@ -53,7 +58,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         coordinator = _coordinator(hass, call)
         try:
             payload = message_payload(call.data[ATTR_MESSAGE], call.data.get(ATTR_ICON),
-                                      call.data[ATTR_DURATION])
+                                      call.data[ATTR_DURATION], call.data[ATTR_LEVEL],
+                                      call.data[ATTR_BLINK])
         except ValueError as error:
             raise ServiceValidationError(f"Invalid message: {error}") from error
         await coordinator.message(payload)

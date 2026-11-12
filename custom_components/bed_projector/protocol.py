@@ -9,7 +9,8 @@ from typing import Any
 from .const import (CONF_ALARM, CONF_CLIMATE_COOL, CONF_CLIMATE_HEAT, CONF_EXTRAS, CONF_INDOOR,
                     CONF_NEXT_ALARM, CONF_NEXT_ALARM_ENABLED, CONF_OUTDOOR, CONF_SUMMARY_TODAY,
                     CONF_SUMMARY_TOMORROW, CONF_WEATHER, MESSAGE_DURATION_DEFAULT,
-                    MESSAGE_DURATION_RANGE, MESSAGE_ICONS, SEASON_AUTO, SEASON_SUMMER, SEASON_WINTER)
+                    MESSAGE_DURATION_RANGE, MESSAGE_ICONS, MESSAGE_LEVEL_DEFAULT, MESSAGE_LEVELS,
+                    SEASON_AUTO, SEASON_SUMMER, SEASON_WINTER)
 
 WEATHER_CONDITIONS = {
     "clear-night", "cloudy", "exceptional", "fog", "hail", "lightning", "lightning-rainy",
@@ -355,18 +356,27 @@ def thermostat(entity: Any, source: str, room: Any) -> dict[str, Any] | None:
 
 
 def message_payload(text: Any, icon: str | None = None,
-                    duration: int = MESSAGE_DURATION_DEFAULT) -> dict[str, Any]:
-    """Body of POST /api/message; ValueError when the firmware would refuse it."""
+                    duration: int = MESSAGE_DURATION_DEFAULT,
+                    level: str = MESSAGE_LEVEL_DEFAULT, blink: bool = False) -> dict[str, Any]:
+    """Body of POST /api/message; ValueError when the firmware would refuse it.
+
+    A duration of 0 keeps the message until it is cleared."""
     message = short(text, 63).strip()
     if not message:
         raise ValueError("empty message")
     if icon is not None and icon not in MESSAGE_ICONS:
         raise ValueError(f"unknown icon {icon}")
-    if not MESSAGE_DURATION_RANGE[0] <= duration <= MESSAGE_DURATION_RANGE[1]:
+    if duration != 0 and not MESSAGE_DURATION_RANGE[0] <= duration <= MESSAGE_DURATION_RANGE[1]:
         raise ValueError("duration out of range")
+    if level not in MESSAGE_LEVELS:
+        raise ValueError(f"unknown level {level}")
     payload: dict[str, Any] = {"text": message, "duration": duration}
     if icon is not None:
         payload["icon"] = icon
+    if level != MESSAGE_LEVEL_DEFAULT:
+        payload["level"] = level
+    if blink:
+        payload["blink"] = True
     return payload
 
 
