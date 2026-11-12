@@ -21,8 +21,12 @@ const widgetLabels = {
   entity1: "Dato HA 1", entity2: "Dato HA 2", entity3: "Dato HA 3", entity4: "Dato HA 4",
   text: "Testo libero", indoor: "Temperatura camera", outdoor: "Temperatura esterna",
   lights: "Luci accese", sun: "Alba e tramonto", wake: "Prossima sveglia", event: "Prossimo evento",
-  moon: "Fase lunare", thermostat: "Termostato",
+  moon: "Fase lunare", thermostat: "Termostato", rain: "Probabilità di pioggia", humidity: "Umidità esterna",
+  wind: "Vento", countdown: "Conto alla rovescia",
 };
+/* Widgets that keep the row's text: free text, or the countdown's "YYYY-MM-DD name". */
+const textWidgets = { text: "Testo", countdown: "Data e nome (AAAA-MM-GG Nome)" };
+const COUNTDOWN_PATTERN = /^\d{4}-\d{2}-\d{2}( .*)?$/;
 /* Mirrors the page schema in main/projector_logic.c: [value, label] pairs in the firmware's order,
  * the first being the default. */
 const off = ["off", "Nascosto"];
@@ -63,13 +67,21 @@ const layoutElements = {
     ["humidity", "Umidità", onOff],
   ],
   list: [["header", "Intestazione con il nome", onOff]],
+  face: [
+    ["dial", "Ora", [["analog", "Lancette"], ["digital", "Digitale"]]],
+    ["marks", "Bordo", [["ticks", "Tacche"], ["numbers", "Numeri 12, 3, 6, 9 (con le lancette)"], ["off", "Nessuno"]]],
+  ],
 };
+/* Watch face complications, in the firmware's slot order. */
+const faceSlots = [["top", "In alto"], ["right", "A destra"], ["bottom", "In basso"], ["left", "A sinistra"]];
+const faceStyleLabels = { icon_value: "Icona e valore", value: "Solo valore", label_value: "Etichetta e valore" };
+const firstLayoutLabels = { clock: "Ora (classica)", face: "Quadrante (lancette o digitale, con complicazioni)" };
 const sizeLabels = { normal: "Normale", small: "Piccolo", large: "Grande" };
 const styleLabels = { label_value: "Etichetta e valore", value: "Solo valore", icon_value: "Icona e valore" };
 const layoutLabels = {
   home: "Casa (allarme, temperature, aperture, luci)", weather: "Meteo (adesso, giorno e sera)",
   agenda: "Agenda (sveglia ed eventi)", climate: "Termostato (rotella con temperatura impostata e attuale)",
-  list: "Elenco widget",
+  list: "Elenco widget", face: "Quadrante (lancette o digitale, con complicazioni)",
 };
 
 function storedToken() {
@@ -86,6 +98,9 @@ let theme = {};       // Draft theme, saved with the pages.
 let calibration = null;
 let calibrationPending = false;
 let pollTimer = null;
+const wakePhaseLabels = {
+  idle: "Nessuna sveglia in corso", sunrise: "Alba in corso: la luce sta salendo", ringing: "Sveglia in corso",
+};
 
 /* ---- Helpers ---- */
 
@@ -162,11 +177,14 @@ function applyStatus(status) {
     $("brightness-value").textContent = `${status.brightness}%`;
   }
   if (document.activeElement !== $("page-timeout")) $("page-timeout").value = status.page_timeout;
+  if (document.activeElement !== $("carousel")) $("carousel").value = status.carousel;
   $("preview-state").hidden = $("cancel-preview").hidden = !status.preview;
   const current = savedPages.find(page => page.id === status.page);
   $("state-summary").textContent = `Pagina: ${current ? current.name : status.page} · ` +
     `Wi-Fi: ${status.wifi_connected ? "connesso" : "non connesso"}`;
   $("current-page").value = status.page;
+  $("wake-summary").textContent = wakePhaseLabels[status.wake_phase] ?? status.wake_phase;
+  $("dismiss-wake").disabled = status.wake_phase === "idle";
   $("ha-summary").textContent = status.ha_fresh ?
     `Aperture: ${status.openings ?? "?"} · Luci: ${status.lights ?? "?"} · ` +
     `Allarme: ${alarmLabels[status.alarm] ?? status.alarm} · ` +
@@ -221,11 +239,41 @@ function widgetRow(page, slot) {
                  value => { widget.widget = value; update(); }),
       pageSelect("Come", Object.entries(styleLabels), widget.style || "label_value", value => { widget.style = value; }),
     );
-    if (widget.widget === "text")
-      row.append(pageField("Testo", widget.text || "", 32, value => { widget.text = value; }));
+    if (textWidgets[widget.widget])
+      row.append(pageField(textWidgets[widget.widget], widget.text || "", 32, value => { widget.text = value; }));
   };
   update();
   return row;
+}
+
+function faceRow(page, slot, label) {
+  let widget = page.widgets.find(item => item && item.slot === slot);
+  if (!widget) {
+    widget = { widget: "", style: "icon_value", text: "", slot };
+    page.widgets.push(widget);
+  }
+  const row = element("div", { className: "widget-row" });
+  const update = () => {
+    row.replaceChildren(
+      pageSelect(label, [["", "Nessuna"], ...Object.entries(widgetLabels)], widget.widget,
+                 value => { widget.widget = value; update(); }),
+      pageSelect("Come", Object.entries(faceStyleLabels), widget.style || "icon_value", value => { widget.style = value; }),
+    );
+    if (textWidgets[widget.widget])
+      row.append(pageField(textWidgets[widget.widget], widget.text || "", 32, value => { widget.text = value; }));
+  };
+  update();
+  return row;
+}
+
+/* Keep the chosen widgets across a change of model: a watch face gives them slots in order. */
+function changeLayout(page, layout) {
+  const chosen = page.widgets.filter(item => item && item.widget);
+  page.widgets = layout === "face" ?
+    chosen.slice(0, faceSlots.length).map((item, index) => ({ ...item, slot: faceSlots[index][0] })) :
+    chosen.map(({ slot, ...item }) => item);
+  page.layout = layout;
+  page.show = {};
 }
 
 function renderPages() {
@@ -236,9 +284,8 @@ function renderPages() {
     const grid = element("div", { className: "page-grid" }, [
       pageField("Nome", page.name, 16, value => { page.name = value; title.textContent = `${index + 1}. ${value}`; }),
     ]);
-    if (index > 0)
-      grid.append(pageSelect("Modello", Object.entries(layoutLabels), page.layout,
-                             value => { page.layout = value; page.show = {}; renderPages(); }));
+    grid.append(pageSelect("Modello", Object.entries(index > 0 ? layoutLabels : firstLayoutLabels), page.layout,
+                           value => { changeLayout(page, value); renderPages(); }));
     grid.append(pageSelect("Dimensione testo", Object.entries(sizeLabels), page.size || "normal",
                            value => { page.size = value; }));
     if (showsTomorrow(page)) {
@@ -251,6 +298,10 @@ function renderPages() {
     const card = element("div", { className: "page-editor" }, [title, grid, element("h4", { textContent: "Elementi" }), elements]);
     if (page.layout === "list")
       for (let slot = 0; slot < MAX_WIDGETS; slot++) card.append(widgetRow(page, slot));
+    if (page.layout === "face") {
+      card.append(element("h4", { textContent: "Complicazioni" }));
+      for (const [slot, label] of faceSlots) card.append(faceRow(page, slot, label));
+    }
     const actions = element("div", { className: "actions" });
     const trial = element("button", { type: "button", textContent: "Prova sul proiettore" });
     trial.addEventListener("click", () => run(async () => {
@@ -294,16 +345,38 @@ function pagesDocument() {
         throw new Error(`Pagina ${index + 1}: l'ora della previsione di domani va da 0 a 24`);
       out.tomorrow_from = hour;
     }
-    if (page.layout === "list")
+    if (page.layout === "list" || page.layout === "face")
       out.widgets = page.widgets.filter(widget => widget && widget.widget).map(widget => {
-        if (widget.widget !== "text") return { widget: widget.widget, style: widget.style || "label_value" };
-        if (utf8Length(widget.text || "") > 32 || /[\u0000-\u001f\u007f]/.test(widget.text || ""))
+        const face = page.layout === "face";
+        const base = { widget: widget.widget, style: widget.style || (face ? "icon_value" : "label_value") };
+        if (face) base.slot = widget.slot;
+        if (!textWidgets[widget.widget]) return base;
+        const text = widget.widget === "countdown" ? (widget.text || "").trim() : widget.text || "";
+        if (utf8Length(text) > 32 || /[\u0000-\u001f\u007f]/.test(text))
           throw new Error(`Pagina ${index + 1}: il testo può avere al massimo 32 caratteri`);
-        return { widget: "text", style: widget.style || "label_value", text: widget.text || "" };
+        if (widget.widget === "countdown" && !COUNTDOWN_PATTERN.test(text))
+          throw new Error(`Pagina ${index + 1}: il conto alla rovescia vuole la data come 2026-12-24 seguita dal nome`);
+        return { ...base, text };
       });
     return out;
   });
   return { theme: { ...theme }, pages: list };
+}
+
+/* ---- Alarm ---- */
+
+function applyWake(wake) {
+  $("wake-sunrise").value = wake.sunrise;
+  $("wake-screen").value = wake.screen;
+  $("wake-blink").checked = wake.blink;
+  $("wake-summary").textContent = wakePhaseLabels[wake.phase] ?? wake.phase;
+  $("dismiss-wake").disabled = wake.phase === "idle";
+}
+
+function minutesField(id, max, label) {
+  const value = Number($(id).value);
+  if (!Number.isInteger(value) || value < 0 || value > max) throw new Error(`${label}: da 0 a ${max} minuti`);
+  return value;
 }
 
 /* ---- Calibration ---- */
@@ -358,9 +431,9 @@ function adjustCalibration(change) {
 /* ---- Loading ---- */
 
 async function loadAll() {
-  const [status, configuration, pageData, calibrationData] = await Promise.all([
+  const [status, configuration, pageData, calibrationData, wake] = await Promise.all([
     request("/api/status"), request("/api/config"), request("/api/pages"),
-    request("/api/calibration"),
+    request("/api/calibration"), request("/api/wake"),
   ]);
   showApp(true);
   savedPages = pageData.pages;
@@ -375,6 +448,7 @@ async function loadAll() {
   renderTheme();
   renderCalibration();
   applyStatus(status);
+  applyWake(wake);
 }
 
 /* ---- Events ---- */
@@ -410,9 +484,32 @@ $("page-timeout").addEventListener("change", () => run(async () => {
   await display({ page_timeout: seconds });
   message(seconds ? `La pagina Ora torna dopo ${seconds} secondi` : "La pagina scelta resta visibile");
 }));
+$("carousel").addEventListener("change", () => run(async () => {
+  const seconds = Number($("carousel").value);
+  if (!Number.isInteger(seconds) || (seconds !== 0 && (seconds < 5 || seconds > 600)))
+    throw new Error("Usa 0 (spenta) oppure un valore da 5 a 600 secondi");
+  await display({ carousel: seconds });
+  message(seconds ? `Le pagine ruotano ogni ${seconds} secondi` : "Rotazione delle pagine spenta");
+}));
 $("current-page").addEventListener("change", () => run(() => display({ page: $("current-page").value })));
 for (const [button, move] of [["previous-page", "previous"], ["next-page", "next"]])
   $(button).addEventListener("click", () => run(() => display({ move })));
+
+$("save-wake").addEventListener("click", () => run(async () => {
+  const sunrise = minutesField("wake-sunrise", 60, "Luce dell'alba");
+  const screen = minutesField("wake-screen", 30, "Schermata Buongiorno");
+  applyWake(await request("/api/wake", "POST", { sunrise, screen, blink: $("wake-blink").checked }));
+  message(sunrise || screen || $("wake-blink").checked ? "Sveglia salvata" : "Sveglia salvata: il proiettore non fa nulla alla sveglia");
+}));
+$("test-wake").addEventListener("click", () => run(async () => {
+  const wake = await request("/api/wake", "POST", { test: true });
+  applyWake(wake);
+  message(wake.sunrise ? "Prova in corso: un minuto di alba, poi la sveglia" : "Prova in corso: la sveglia parte subito");
+}));
+$("dismiss-wake").addEventListener("click", () => run(async () => {
+  applyWake(await request("/api/wake", "POST", { dismiss: true }));
+  message("Sveglia fermata");
+}));
 
 for (const [id, mode, done] of [["calibration-start", "start", ""],
                                 ["calibration-save", "save", "Regolazione salvata"],

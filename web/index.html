@@ -29,7 +29,21 @@
         <div class="actions"><button id="previous-page">Precedente</button><button id="next-page">Successiva</button></div>
         <label for="page-timeout">Ritorno alla pagina Ora dopo (secondi, 0 = mai)</label>
         <input id="page-timeout" type="number" min="0" max="3600" step="1" value="30">
-        <p class="hint">Luminosità e ritorno si applicano appena li modifichi.</p>
+        <label for="carousel">Rotazione delle pagine ogni (secondi, 0 = spenta)</label>
+        <input id="carousel" type="number" min="0" max="600" step="1" value="0">
+        <p class="hint">Con la rotazione accesa le pagine si alternano da sole, Ora compresa, e il ritorno alla pagina Ora non si applica. Luminosità, ritorno e rotazione si applicano appena li modifichi.</p>
+      </section>
+      <section class="card">
+        <h2>Sveglia</h2>
+        <p>Il proiettore segue la prossima sveglia che riceve da Home Assistant (opzione <strong>Prossima sveglia</strong> dell'integrazione). Prima della sveglia la luce può salire piano come un'alba, anche a proiezione spenta; all'ora della sveglia la proiezione si accende e può mostrare per qualche minuto ora, meteo e primo evento del giorno, e lampeggiare per un minuto.</p>
+        <p id="wake-summary" aria-live="polite"></p>
+        <label for="wake-sunrise">Luce dell'alba: minuti prima della sveglia (0 = spenta)</label>
+        <input id="wake-sunrise" type="number" min="0" max="60" step="1" value="0">
+        <label for="wake-screen">Schermata Buongiorno: minuti dall'ora della sveglia (0 = spenta)</label>
+        <input id="wake-screen" type="number" min="0" max="30" step="1" value="0">
+        <div class="row"><input id="wake-blink" type="checkbox"><label for="wake-blink">Lampeggio per un minuto all'ora della sveglia</label></div>
+        <div class="actions"><button id="save-wake">Salva sveglia</button><button id="test-wake" type="button" class="secondary">Prova sveglia</button><button id="dismiss-wake" type="button" class="secondary">Ferma</button></div>
+        <p class="hint">L'alba arriva alla luminosità impostata in Proiezione. <strong>Prova sveglia</strong> usa le impostazioni salvate: un'alba di un minuto (se l'alba è attiva) e poi la sveglia; alla fine la proiezione resta accesa. Spegnere la proiezione, o premere <strong>Ferma</strong>, interrompe alba e sveglia.</p>
       </section>
       <section class="card">
         <h2>Centraggio e orientamento</h2>
@@ -49,7 +63,7 @@
       </section>
       <section class="card">
         <h2>Pagine e aspetto</h2>
-        <p>L'ora resta la prima pagina. Puoi aggiungere fino a quattro pagine. Per ogni pagina scegli la dimensione del testo e, elemento per elemento, se e come mostrarlo; il modello Elenco mostra fino a quattro righe a scelta. Con <strong>Prova sul proiettore</strong> vedi la bozza senza salvarla: torna da sola alla configurazione salvata dopo 2 minuti. Le modifiche restano solo dopo <strong>Salva pagine</strong>.</p>
+        <p>La prima pagina è sempre l'ora: classica oppure un Quadrante con lancette o ora digitale e fino a quattro complicazioni. Puoi aggiungere fino a quattro pagine. Per ogni pagina scegli la dimensione del testo e, elemento per elemento, se e come mostrarlo; il modello Elenco mostra fino a quattro righe a scelta. Con <strong>Prova sul proiettore</strong> vedi la bozza senza salvarla: torna da sola alla configurazione salvata dopo 2 minuti. Le modifiche restano solo dopo <strong>Salva pagine</strong>.</p>
         <div class="page-editor">
           <h3>Tema</h3>
           <div class="page-grid">
