@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,9 @@
 #define PAGES_JSON_MAX 4000           /* nvs_set_str limit, terminator included. */
 #define DEFAULT_TINT 0xffb36b
 #define DEFAULT_TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
+/* Clocks before 2020 have not been set by NTP yet. */
+#define VALID_TIME 1577836800
+#define WAKE_TEST_MS 60000LL /* "Prova sveglia": a minute of sunrise, then the alarm. */
 #define ARRAY_COUNT(items) (sizeof(items) / sizeof((items)[0]))
 
 /* Names HA may pass as a message icon; bed_ui.c maps each to its glyph. */
@@ -41,13 +45,14 @@ static SemaphoreHandle_t lock;
 static projector_snapshot_t state;
 static int64_t ha_received_us;
 static int64_t page_selected_us;
-static int64_t message_shown_us;
 static int64_t message_duration_us;
 static int64_t preview_started_us;
 static char api_token[33];
 static char tz_value[128] = DEFAULT_TIMEZONE;
 static projector_calibration_t saved_calibration;
 static bool discovery = true; /* Advertise the _bed-projector service for Home Assistant. */
+/* "YYYY-MM-DD HH:MM" of the last alarm followed, so it is not followed again while HA still sends it. */
+static char wake_followed[17];
 
 /* Pages and theme as one document: what /api/pages reads and writes. */
 typedef struct {
@@ -122,12 +127,22 @@ static esp_err_t write_presentation(nvs_handle_t handle, const void *context)
     esp_err_t err = nvs_set_u8(handle, "proj_on", s->power ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, "proj_bri", s->brightness);
     if (err == ESP_OK) err = nvs_set_u16(handle, "proj_return", s->page_timeout);
+    if (err == ESP_OK) err = nvs_set_u16(handle, "proj_carousel", s->carousel);
     return err;
 }
 
 static esp_err_t write_pages(nvs_handle_t handle, const void *context)
 {
     return nvs_set_str(handle, "proj_pages", context);
+}
+
+static esp_err_t write_wake(nvs_handle_t handle, const void *context)
+{
+    const projector_wake_t *w = context;
+    esp_err_t err = nvs_set_u8(handle, "proj_sunrise", w->sunrise);
+    if (err == ESP_OK) err = nvs_set_u8(handle, "proj_wakescr", w->screen);
+    if (err == ESP_OK) err = nvs_set_u8(handle, "proj_wakeblink", w->blink ? 1 : 0);
+    return err;
 }
 
 static esp_err_t write_calibration(nvs_handle_t handle, const void *context)
@@ -215,7 +230,7 @@ static bool page_json(const projector_page_t *page, cJSON *item)
     if (!show) return false;
     for (int i = 0; i < layout->element_count; ++i)
         if (!add_string(show, layout->elements[i].name, layout->elements[i].modes[page->show[i]])) return false;
-    if (page->layout != LAYOUT_LIST) return true;
+    if (page->layout != LAYOUT_LIST && page->layout != LAYOUT_FACE) return true;
     cJSON *list = cJSON_AddArrayToObject(item, "widgets");
     if (!list) return false;
     for (int i = 0; i < page->widget_count; ++i) {
@@ -227,7 +242,10 @@ static bool page_json(const projector_page_t *page, cJSON *item)
         }
         if (!add_string(entry, "widget", projector_widgets[widget->type]) ||
             !add_string(entry, "style", projector_styles[widget->style]) ||
-            (widget->type == WIDGET_TEXT && !add_string(entry, "text", widget->text))) return false;
+            ((widget->type == WIDGET_TEXT || widget->type == WIDGET_COUNTDOWN) &&
+             !add_string(entry, "text", widget->text)) ||
+            (page->layout == LAYOUT_FACE && !add_string(entry, "slot", projector_slots[widget->slot])))
+            return false;
     }
     return true;
 }
@@ -282,23 +300,34 @@ static bool parse_show(const cJSON *item, projector_page_t *out)
     return true;
 }
 
-/* List lines: {"widget", "style", "text"}; only a list page has them. */
+/* List lines {"widget", "style", "text"} or watch face complications, which also need a
+ * "slot" of their own; other pages have none. */
 static bool parse_widgets(const cJSON *item, projector_page_t *out)
 {
     if (!item) return true;
+    bool face = out->layout == LAYOUT_FACE;
     if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > PROJECTOR_MAX_WIDGETS ||
-        (out->layout != LAYOUT_LIST && cJSON_GetArraySize(item))) return false;
+        (out->layout != LAYOUT_LIST && !face && cJSON_GetArraySize(item))) return false;
+    unsigned used_slots = 0;
     const cJSON *entry;
     cJSON_ArrayForEach(entry, item) {
         projector_widget_t *widget = &out->widgets[out->widget_count++];
         const cJSON *type = cJSON_GetObjectItemCaseSensitive(entry, "widget");
         const cJSON *text = cJSON_GetObjectItemCaseSensitive(entry, "text");
-        if (!cJSON_IsObject(entry) || !type ||
+        const cJSON *slot = cJSON_GetObjectItemCaseSensitive(entry, "slot");
+        if (!cJSON_IsObject(entry) || !type || face != (slot != NULL) ||
             !parse_choice(type, projector_widgets, WIDGET_COUNT, &widget->type) ||
             !parse_choice(cJSON_GetObjectItemCaseSensitive(entry, "style"), projector_styles, STYLE_COUNT,
                           &widget->style) ||
+            !parse_choice(slot, projector_slots, SLOT_COUNT, &widget->slot) ||
+            (used_slots & (1u << widget->slot)) ||
             !parse_text(text, widget->text, sizeof(widget->text))) return false;
-        if (widget->type != WIDGET_TEXT) widget->text[0] = 0;
+        if (face) used_slots |= 1u << widget->slot;
+        int year, month, day;
+        const char *name;
+        if (widget->type == WIDGET_COUNTDOWN &&
+            !projector_parse_countdown(widget->text, &year, &month, &day, &name)) return false;
+        if (widget->type != WIDGET_TEXT && widget->type != WIDGET_COUNTDOWN) widget->text[0] = 0;
     }
     return true;
 }
@@ -321,10 +350,10 @@ static bool parse_page(const cJSON *item, int index, const projector_page_t *pre
     if (!parse_choice(FIELD("size"), projector_sizes, SIZE_COUNT, &out->size) ||
         !parse_show(FIELD("show"), out) || !parse_widgets(FIELD("widgets"), out)) return false;
 #undef FIELD
-    /* The clock is always the first page and only the first. */
-    bool clock = !strcmp(id->valuestring, "clock") || layout_index == LAYOUT_CLOCK;
-    bool first_is_clock = !strcmp(id->valuestring, "clock") && layout_index == LAYOUT_CLOCK;
-    if (index == 0 ? !first_is_clock : clock) return false;
+    /* The first page, and only the first, is the clock: the classic one or a watch face. */
+    bool clock_id = !strcmp(id->valuestring, "clock");
+    bool first_is_clock = clock_id && (layout_index == LAYOUT_CLOCK || layout_index == LAYOUT_FACE);
+    if (index == 0 ? !first_is_clock : clock_id || layout_index == LAYOUT_CLOCK) return false;
     for (int i = 0; i < index; ++i)
         if (!strcmp(previous[i].id, id->valuestring)) return false;
     strcpy(out->id, id->valuestring);
@@ -362,7 +391,9 @@ static esp_err_t parse_look(const cJSON *root, look_t *out, char *error, size_t 
         valid = parse_page(cJSON_GetArrayItem(pages, i), i, out->pages, &out->pages[i]);
     if (!valid) {
         snprintf(error, error_size, "Invalid pages: 1-%d pages with unique ids and 1-16 character names, "
-                 "clock first, known layouts, elements and modes, up to %d widgets on list pages, "
+                 "clock first (clock or face layout), known layouts, elements and modes, up to %d widgets "
+                 "on list and face pages, one per slot on face pages, "
+                 "countdown text \"YYYY-MM-DD name\", "
                  "valid theme", PROJECTOR_MAX_PAGES, PROJECTOR_MAX_WIDGETS);
         return ESP_ERR_INVALID_ARG;
     }
@@ -464,6 +495,8 @@ static void load_presentation(nvs_handle_t handle)
     if (nvs_get_u8(handle, "proj_on", &value) == ESP_OK) state.power = value != 0;
     if (nvs_get_u16(handle, "proj_return", &timeout) == ESP_OK && projector_page_timeout_valid(timeout))
         state.page_timeout = timeout;
+    if (nvs_get_u16(handle, "proj_carousel", &timeout) == ESP_OK && projector_carousel_valid(timeout))
+        state.carousel = timeout;
     uint8_t geometry[3];
     size_t size = sizeof(geometry);
     if (nvs_get_blob(handle, "proj_circle", geometry, &size) == ESP_OK && size == sizeof(geometry) &&
@@ -481,6 +514,9 @@ static void load_presentation(nvs_handle_t handle)
     if (nvs_get_str(handle, "timezone", tz_value, &size) != ESP_OK || !tz_value[0])
         strcpy(tz_value, DEFAULT_TIMEZONE);
     if (nvs_get_u8(handle, "proj_discover", &value) == ESP_OK) discovery = value != 0;
+    if (nvs_get_u8(handle, "proj_sunrise", &value) == ESP_OK && value <= 60) state.wake.sunrise = value;
+    if (nvs_get_u8(handle, "proj_wakescr", &value) == ESP_OK && value <= 30) state.wake.screen = value;
+    if (nvs_get_u8(handle, "proj_wakeblink", &value) == ESP_OK) state.wake.blink = value != 0;
 }
 
 esp_err_t projector_init(void)
@@ -493,6 +529,7 @@ esp_err_t projector_init(void)
     if (err != ESP_OK) return err;
     load_presentation(handle);
     load_pages(handle);
+    page_selected_us = esp_timer_get_time(); /* The rotation counts from boot. */
     err = apply_build_wifi(handle);
     if (err == ESP_OK) err = load_token(handle);
     if (err == ESP_OK) err = nvs_commit(handle);
@@ -511,19 +548,71 @@ void projector_snapshot(projector_snapshot_t *out)
     xSemaphoreGive(lock);
 }
 
+/* How long the alarm lasts from its time: the good morning screen or the minute of pulsing,
+ * whichever is longer. */
+static int64_t ringing_us(const projector_wake_t *w)
+{
+    int64_t screen = w->screen * 60000000LL, pulse = w->blink ? PROJECTOR_PULSE_MS * 1000LL : 0;
+    return screen > pulse ? screen : pulse;
+}
+
+/* Follow the next alarm HA sends: catch it once the sunrise should start, then carry on by the
+ * esp_timer clock, so HA moving on to the next alarm or going stale does not cut it short.
+ * Caller owns the state mutex. */
+static void follow_wake_locked(int64_t now)
+{
+    const projector_wake_t *w = &state.wake;
+    if (state.wake_phase == WAKE_IDLE && (w->sunrise || w->screen || w->blink) && state.ha.wake_known &&
+        state.ha.wake_date[0] && projector_data_fresh(ha_received_us, now, HA_TTL_US)) {
+        time_t clock = time(NULL);
+        struct tm local;
+        localtime_r(&clock, &local);
+        char key[sizeof(wake_followed)];
+        snprintf(key, sizeof(key), "%.10s %.5s", state.ha.wake_date, state.ha.wake_time);
+        int32_t left = clock > VALID_TIME ?
+            projector_seconds_to_wake(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, local.tm_hour,
+                                      local.tm_min, local.tm_sec, state.ha.wake_date, state.ha.wake_time) :
+            PROJECTOR_NO_WAKE;
+        /* Within the sunrise, or in the alarm's own minute. */
+        if (left != PROJECTOR_NO_WAKE && left <= w->sunrise * 60 && left > -60 && strcmp(key, wake_followed)) {
+            strcpy(wake_followed, key);
+            state.wake_at_us = now + left * 1000000LL;
+            state.wake_ramp_ms = w->sunrise * 60000LL;
+            state.wake_phase = WAKE_SUNRISE;
+        }
+    }
+    if (state.wake_phase == WAKE_SUNRISE && now >= state.wake_at_us) {
+        state.wake_phase = WAKE_RINGING;
+        state.power = true;
+    }
+    if (state.wake_phase == WAKE_RINGING && now >= state.wake_at_us + ringing_us(w))
+        state.wake_phase = WAKE_IDLE;
+}
+
 void projector_tick(void)
 {
     xSemaphoreTake(lock, portMAX_DELAY);
-    /* A trial keeps its page until it ends. */
-    if (!state.preview && projector_page_timed_out(state.page_index, page_selected_us,
-                                                   esp_timer_get_time(), state.page_timeout * 1000000LL))
+    int64_t now = esp_timer_get_time();
+    follow_wake_locked(now);
+    /* A trial keeps its page until it ends; the rotation also waits while something covers the pages. */
+    if (state.carousel) {
+        bool covered = state.message.active || state.calibration.active ||
+            (state.wake_phase == WAKE_RINGING && state.wake.screen);
+        if (!state.preview && !covered &&
+            projector_expired(page_selected_us, now, state.carousel * 1000000LL)) {
+            state.page_index = projector_move_page(state.page_index, state.page_count, true);
+            page_selected_us = now;
+        }
+    } else if (!state.preview && projector_page_timed_out(state.page_index, page_selected_us, now,
+                                                          state.page_timeout * 1000000LL))
         state.page_index = 0;
-    if (state.preview && projector_expired(preview_started_us, esp_timer_get_time(), PREVIEW_US)) {
+    if (state.preview && projector_expired(preview_started_us, now, PREVIEW_US)) {
         state.preview = false;
         apply_look_locked(&saved_look, NULL);
     }
-    if (state.message.active &&
-        projector_expired(message_shown_us, esp_timer_get_time(), message_duration_us))
+    /* A duration of zero keeps the message until it is cleared. */
+    if (state.message.active && message_duration_us &&
+        projector_expired(state.message.shown_us, now, message_duration_us))
         memset(&state.message, 0, sizeof(state.message));
     xSemaphoreGive(lock);
 }
@@ -597,12 +686,14 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     const cJSON *page = cJSON_GetObjectItemCaseSensitive(root, "page");
     const cJSON *move = cJSON_GetObjectItemCaseSensitive(root, "move");
     const cJSON *timeout = cJSON_GetObjectItemCaseSensitive(root, "page_timeout");
+    const cJSON *carousel = cJSON_GetObjectItemCaseSensitive(root, "carousel");
     bool valid_move = !move || (cJSON_IsString(move) &&
         (!strcmp(move->valuestring, "next") || !strcmp(move->valuestring, "previous")));
     if ((power && !cJSON_IsBool(power)) || (brightness && !is_integer(brightness, 1, 100)) ||
         (page && !cJSON_IsString(page)) || !valid_move ||
         (timeout && (!is_integer(timeout, 0, 65535) || !projector_page_timeout_valid(timeout->valueint))) ||
-        (page && move) || (!power && !brightness && !page && !move && !timeout)) {
+        (carousel && (!is_integer(carousel, 0, 65535) || !projector_carousel_valid(carousel->valueint))) ||
+        (page && move) || (!power && !brightness && !page && !move && !timeout && !carousel)) {
         snprintf(error, error_size, "Invalid command");
         return ESP_ERR_INVALID_ARG;
     }
@@ -622,21 +713,27 @@ esp_err_t projector_set_command(const cJSON *root, char *error, size_t error_siz
     if (power) next.power = cJSON_IsTrue(power);
     if (brightness) next.brightness = brightness->valueint;
     if (timeout) next.page_timeout = timeout->valueint;
+    if (carousel) next.carousel = carousel->valueint;
     esp_err_t err = ESP_OK;
     if (next_page < 0) {
         err = ESP_ERR_INVALID_ARG;
         snprintf(error, error_size, "Unknown page");
     } else if (next.power != state.power || next.brightness != state.brightness ||
-               next.page_timeout != state.page_timeout) {
+               next.page_timeout != state.page_timeout || next.carousel != state.carousel) {
         err = nvs_save(write_presentation, &next);
         if (err != ESP_OK) snprintf(error, error_size, "NVS write failed");
     }
     if (err == ESP_OK) {
+        /* Turning the light off also stops a sunrise or an alarm under way. */
+        if (power && !next.power) state.wake_phase = WAKE_IDLE;
         state.power = next.power;
         state.brightness = next.brightness;
         state.page_timeout = next.page_timeout;
         state.page_index = next_page;
-        if (page || move) page_selected_us = esp_timer_get_time();
+        /* A new rotation period counts from now, not from the last page change. */
+        if (page || move || (carousel && next.carousel != state.carousel))
+            page_selected_us = esp_timer_get_time();
+        state.carousel = next.carousel;
     }
     xSemaphoreGive(lock);
     return err;
@@ -860,24 +957,92 @@ esp_err_t projector_set_message(const cJSON *root, char *error, size_t error_siz
     const cJSON *text = cJSON_GetObjectItemCaseSensitive(root, "text");
     const cJSON *icon = cJSON_GetObjectItemCaseSensitive(root, "icon");
     const cJSON *duration = cJSON_GetObjectItemCaseSensitive(root, "duration");
+    const cJSON *level = cJSON_GetObjectItemCaseSensitive(root, "level");
+    const cJSON *blink = cJSON_GetObjectItemCaseSensitive(root, "blink");
     projector_message_t message = {0};
-    bool clearing = cJSON_IsTrue(clear) && !text && !icon && !duration;
+    bool clearing = cJSON_IsTrue(clear) && cJSON_GetArraySize(root) == 1;
     bool showing = !clear && parse_required_text(text, message.text, sizeof(message.text)) &&
         message.text[0] && (!icon || (cJSON_IsString(icon) &&
             in_list(icon->valuestring, message_icons, ARRAY_COUNT(message_icons)))) &&
-        (!duration || is_integer(duration, 5, 3600));
+        (!duration ||
+         (is_integer(duration, 0, 3600) && (duration->valueint == 0 || duration->valueint >= 5))) &&
+        parse_choice(level, projector_message_levels, MESSAGE_LEVEL_COUNT, &message.level) &&
+        (!blink || cJSON_IsBool(blink));
     if (!clearing && !showing) {
-        snprintf(error, error_size, "Invalid message: text of 1-63 bytes, known icon, duration 5-3600 s");
+        snprintf(error, error_size, "Invalid message: text of 1-63 bytes, known icon and level, "
+                 "duration 0 (until cleared) or 5-3600 s, boolean blink");
         return ESP_ERR_INVALID_ARG;
     }
     message.active = showing;
+    message.blink = showing && cJSON_IsTrue(blink);
     if (showing && icon) strcpy(message.icon, icon->valuestring);
+    if (showing) message.shown_us = esp_timer_get_time();
     xSemaphoreTake(lock, portMAX_DELAY);
     state.message = message;
-    message_shown_us = esp_timer_get_time();
     message_duration_us = (duration ? duration->valueint : MESSAGE_DURATION_DEFAULT) * 1000000LL;
     xSemaphoreGive(lock);
     return ESP_OK;
+}
+
+/* ---- Alarm ---- */
+
+const char *const projector_wake_phases[WAKE_PHASE_COUNT] = {
+    [WAKE_IDLE] = "idle", [WAKE_SUNRISE] = "sunrise", [WAKE_RINGING] = "ringing",
+};
+
+/* {"sunrise", "screen", "blink"} in any combination saves them; {"dismiss": true} stops the
+ * alarm under way and {"test": true} plays one now, each alone. */
+esp_err_t projector_set_wake(const cJSON *root, char *error, size_t error_size)
+{
+    const cJSON *sunrise = cJSON_GetObjectItemCaseSensitive(root, "sunrise");
+    const cJSON *screen = cJSON_GetObjectItemCaseSensitive(root, "screen");
+    const cJSON *blink = cJSON_GetObjectItemCaseSensitive(root, "blink");
+    const cJSON *dismiss = cJSON_GetObjectItemCaseSensitive(root, "dismiss");
+    const cJSON *test = cJSON_GetObjectItemCaseSensitive(root, "test");
+    int fields = cJSON_GetArraySize(root);
+    bool action = fields == 1 && (cJSON_IsTrue(dismiss) || cJSON_IsTrue(test));
+    bool settings = !dismiss && !test && fields == (sunrise != NULL) + (screen != NULL) + (blink != NULL) &&
+        fields > 0 && (!sunrise || is_integer(sunrise, 0, 60)) && (!screen || is_integer(screen, 0, 30)) &&
+        (!blink || cJSON_IsBool(blink));
+    if (!action && !settings) {
+        snprintf(error, error_size, "Invalid alarm: sunrise 0-60, screen 0-30 minutes, boolean blink; "
+                 "or dismiss or test alone");
+        return ESP_ERR_INVALID_ARG;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (cJSON_IsTrue(dismiss)) state.wake_phase = WAKE_IDLE;
+    else if (cJSON_IsTrue(test)) {
+        state.wake_at_us = esp_timer_get_time() + (state.wake.sunrise ? WAKE_TEST_MS * 1000 : 0);
+        state.wake_ramp_ms = WAKE_TEST_MS;
+        state.wake_phase = WAKE_SUNRISE;
+    } else {
+        projector_wake_t next = state.wake;
+        if (sunrise) next.sunrise = sunrise->valueint;
+        if (screen) next.screen = screen->valueint;
+        if (blink) next.blink = cJSON_IsTrue(blink);
+        err = nvs_save(write_wake, &next);
+        if (err == ESP_OK) state.wake = next;
+        else snprintf(error, error_size, "NVS write failed");
+    }
+    xSemaphoreGive(lock);
+    return err;
+}
+
+cJSON *projector_wake_json(void)
+{
+    xSemaphoreTake(lock, portMAX_DELAY);
+    projector_wake_t w = state.wake;
+    uint8_t phase = state.wake_phase;
+    xSemaphoreGive(lock);
+    cJSON *root = cJSON_CreateObject();
+    if (!root || !cJSON_AddNumberToObject(root, "sunrise", w.sunrise) ||
+        !cJSON_AddNumberToObject(root, "screen", w.screen) || !cJSON_AddBoolToObject(root, "blink", w.blink) ||
+        !add_string(root, "phase", projector_wake_phases[phase])) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    return root;
 }
 
 /* ---- Network and identity ---- */

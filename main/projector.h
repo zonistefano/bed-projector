@@ -22,11 +22,12 @@
  * projector_page_timeout_valid() holds the accepted range. */
 #define PROJECTOR_PAGE_TIMEOUT_DEFAULT 30
 
-/* One line of a list page. */
+/* One line of a list page, or one complication of a watch face page. */
 typedef struct {
     uint8_t type;  /* WIDGET_* */
     uint8_t style; /* STYLE_* */
-    char text[33]; /* Free text of a WIDGET_TEXT line. */
+    uint8_t slot;  /* SLOT_*, watch face pages only. */
+    char text[33]; /* Free text of a WIDGET_TEXT line, date and name of a WIDGET_COUNTDOWN. */
 } projector_widget_t;
 
 /* A page and how it shows its elements; see the page schema in projector_logic.h. */
@@ -133,12 +134,25 @@ typedef struct {
     projector_thermostat_t thermostat;
 } projector_ha_t;
 
-/* A temporary message sent by HA, shown over every page until it expires. */
+/* A message sent by HA, shown over every page until it expires or is cleared. */
 typedef struct {
     bool active;
     char text[64];
-    char icon[16]; /* A name from the message icon list, or empty. */
+    char icon[16];     /* A name from the message icon list, or empty. */
+    uint8_t level;     /* MESSAGE_* */
+    bool blink;        /* The LED pulses, even with the projection off. */
+    int64_t shown_us;  /* esp_timer time it appeared: when the pulsing started. */
 } projector_message_t;
+
+/* What the projector does around the next alarm HA sends; saved in NVS. */
+typedef struct {
+    uint8_t sunrise; /* Minutes of light rising before the alarm, 0-60; 0 = none. */
+    uint8_t screen;  /* Minutes of the good morning screen from the alarm, 0-30; 0 = none. */
+    bool blink;      /* Pulse the light for the alarm's first minute. */
+} projector_wake_t;
+
+enum { WAKE_IDLE, WAKE_SUNRISE, WAKE_RINGING, WAKE_PHASE_COUNT };
+extern const char *const projector_wake_phases[WAKE_PHASE_COUNT];
 
 typedef struct {
     bool power;
@@ -146,6 +160,7 @@ typedef struct {
     uint8_t page_count;
     uint8_t page_index;
     uint16_t page_timeout; /* Seconds, 0 = never return to the clock. */
+    uint16_t carousel;     /* Seconds per page of the automatic rotation, 0 = off; overrides page_timeout. */
     projector_page_t pages[PROJECTOR_MAX_PAGES];
     projector_theme_t theme;
     bool preview;          /* Pages and theme are an unsaved trial from the web UI. */
@@ -154,6 +169,10 @@ typedef struct {
     bool wifi_connected;
     projector_calibration_t calibration;
     projector_message_t message;
+    projector_wake_t wake;
+    uint8_t wake_phase;   /* WAKE_*: idle, light rising before the alarm, from the alarm on. */
+    int64_t wake_at_us;   /* esp_timer time of the alarm being followed. */
+    int64_t wake_ramp_ms; /* Length of its sunrise. */
 } projector_snapshot_t;
 
 esp_err_t projector_init(void);
@@ -174,3 +193,5 @@ void projector_timezone(char *out, size_t size);
 bool projector_discovery(void);
 esp_err_t projector_set_config(const cJSON *root, char *error, size_t error_size);
 esp_err_t projector_set_calibration(const cJSON *root, char *error, size_t error_size);
+esp_err_t projector_set_wake(const cJSON *root, char *error, size_t error_size);
+cJSON *projector_wake_json(void);

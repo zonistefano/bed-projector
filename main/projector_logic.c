@@ -177,6 +177,12 @@ bool projector_page_timeout_valid(int seconds)
     return seconds == 0 || (seconds >= 5 && seconds <= 3600);
 }
 
+/* Seconds per page of the automatic rotation: 0 turns it off. */
+bool projector_carousel_valid(int seconds)
+{
+    return seconds == 0 || (seconds >= 5 && seconds <= 600);
+}
+
 /* Delay before Wi-Fi reconnection attempt number attempt (from 0): 1 s doubling
  * up to 30 s, so a missing router does not keep the radio busy and the
  * recovery access point stays on its channel. */
@@ -203,6 +209,82 @@ void projector_format_tenths(int tenths, char *out, size_t size)
     const char *sign = tenths < 0 ? "-" : "";
     if (magnitude % 10) snprintf(out, size, "%s%d.%d", sign, magnitude / 10, magnitude % 10);
     else snprintf(out, size, "%s%d", sign, magnitude / 10);
+}
+
+/* Tip of a watch hand position steps into a turn of turn steps (minutes: 60, hours: 720 minutes),
+ * from the centre with y growing downwards: 0 points up, a quarter turn to the right. Hands move
+ * in 60 steps per turn, the hour hand every 12 minutes like a watch's. */
+void projector_hand_end(int position, int turn, float length, float *dx, float *dy)
+{
+    /* sin(6° k), k = 0..15: no libm, so the host tests link without it. */
+    static const float sines[16] = {
+        0.0000000f, 0.1045285f, 0.2079117f, 0.3090170f, 0.4067366f, 0.5000000f, 0.5877853f, 0.6691306f,
+        0.7431448f, 0.8090170f, 0.8660254f, 0.9135455f, 0.9510565f, 0.9781476f, 0.9945219f, 1.0000000f,
+    };
+    int step = (int)((long)(position % turn) * 60 / turn);
+    int quarter = step / 15, k = step % 15;
+    float along = sines[k], across = sines[15 - k]; /* sin and cos of the angle within the quarter. */
+    float x = quarter == 0 ? along : quarter == 1 ? across : quarter == 2 ? -along : -across;
+    float y = quarter == 0 ? across : quarter == 1 ? -along : quarter == 2 ? -across : along;
+    *dx = length * x;
+    *dy = -length * y;
+}
+
+/* LED level of a pulsing projection elapsed_ms after it started: a second of full level and
+ * dim (a fifth, at least 1%) halves for PROJECTOR_PULSE_MS, then steady. Before the start, steady. */
+uint8_t projector_pulse_level(uint8_t level, int64_t elapsed_ms)
+{
+    if (elapsed_ms < 0 || elapsed_ms >= PROJECTOR_PULSE_MS || (elapsed_ms / 500) % 2 == 0) return level;
+    uint8_t dim = level / 5;
+    return dim ? dim : 1;
+}
+
+/* Seconds from the local time to an alarm sent by HA as its local YYYY-MM-DD and HH:MM: negative once
+ * it has passed, PROJECTOR_NO_WAKE when the date is not within the coming week or the time is not
+ * HH:MM. Counted on the wall clock, like projector_format_countdown(). */
+int32_t projector_seconds_to_wake(int year, int month, int day, int hour, int minute, int second,
+                                  const char *wake_date, const char *wake_time)
+{
+    if (!wake_date || !wake_time || strlen(wake_time) != 5 || wake_time[2] != ':') return PROJECTOR_NO_WAKE;
+    for (int i = 0; i < 5; ++i)
+        if (i != 2 && (wake_time[i] < '0' || wake_time[i] > '9')) return PROJECTOR_NO_WAKE;
+    int wake_hour = (wake_time[0] - '0') * 10 + (wake_time[1] - '0');
+    int wake_minute = (wake_time[3] - '0') * 10 + (wake_time[4] - '0');
+    int days = projector_relative_day(year, month, day, wake_date);
+    if (days < 0 || wake_hour > 23 || wake_minute > 59) return PROJECTOR_NO_WAKE;
+    return days * 86400 + wake_hour * 3600 + wake_minute * 60 - (hour * 3600 + minute * 60 + second);
+}
+
+/* LED level left_ms before an alarm, over a sunrise of ramp_ms that ends at brightness: off before
+ * it, then from 1% up along a square curve, which looks even to the eye rather than jumping early. */
+uint8_t projector_sunrise_level(int64_t left_ms, int64_t ramp_ms, uint8_t brightness)
+{
+    if (ramp_ms <= 0 || left_ms <= 0) return brightness;
+    if (left_ms >= ramp_ms) return 0;
+    int64_t done = ramp_ms - left_ms;
+    int64_t level = (int64_t)brightness * done * done / (ramp_ms * ramp_ms); /* Ramps up to an hour fit. */
+    return level < 1 ? 1 : (uint8_t)level;
+}
+
+/* A countdown widget's text: "YYYY-MM-DD" of a real date, then optionally a space and a name. */
+bool projector_parse_countdown(const char *text, int *year, int *month, int *day, const char **name)
+{
+    if (!text || strlen(text) < 10 || (text[10] && text[10] != ' ')) return false;
+    for (int i = 0; i < 10; ++i)
+        if (i == 4 || i == 7 ? text[i] != '-' : text[i] < '0' || text[i] > '9') return false;
+    *year = (text[0] - '0') * 1000 + (text[1] - '0') * 100 + (text[2] - '0') * 10 + (text[3] - '0');
+    *month = (text[5] - '0') * 10 + (text[6] - '0');
+    *day = (text[8] - '0') * 10 + (text[9] - '0');
+    if (*year < 2000 || *month < 1 || *month > 12 || *day < 1 || *day > days_in_month(*year, *month))
+        return false;
+    *name = text[10] ? text + 11 : "";
+    return true;
+}
+
+/* Calendar days from one date to another; negative when the second is earlier. */
+long projector_days_between(int year, int month, int day, int to_year, int to_month, int to_day)
+{
+    return days_from_civil(to_year, to_month, to_day) - days_from_civil(year, month, day);
 }
 
 /* ---- Page schema ---- */
@@ -267,6 +349,12 @@ static const projector_element_t list_elements[] = {
     [LIST_HEADER] = {"header", on_off, COUNT(on_off)},
 };
 
+static const projector_element_t face_elements[] = {
+    [FACE_DIAL] = {"dial", (const char *const[]){[DIAL_ANALOG] = "analog", [DIAL_DIGITAL] = "digital"}, 2},
+    [FACE_MARKS] = {"marks", (const char *const[]){[MARKS_TICKS] = "ticks", [MARKS_NUMBERS] = "numbers",
+        [MARKS_OFF] = "off"}, 3},
+};
+
 const projector_layout_t projector_layouts[LAYOUT_COUNT] = {
     [LAYOUT_CLOCK] = {"clock", clock_elements, COUNT(clock_elements)},
     [LAYOUT_HOME] = {"home", home_elements, COUNT(home_elements)},
@@ -274,6 +362,7 @@ const projector_layout_t projector_layouts[LAYOUT_COUNT] = {
     [LAYOUT_AGENDA] = {"agenda", agenda_elements, COUNT(agenda_elements)},
     [LAYOUT_CLIMATE] = {"climate", climate_elements, COUNT(climate_elements)},
     [LAYOUT_LIST] = {"list", list_elements, COUNT(list_elements)},
+    [LAYOUT_FACE] = {"face", face_elements, COUNT(face_elements)},
 };
 
 const char *const projector_widgets[WIDGET_COUNT] = {
@@ -282,16 +371,23 @@ const char *const projector_widgets[WIDGET_COUNT] = {
     [WIDGET_ENTITY3] = "entity3", [WIDGET_ENTITY4] = "entity4", [WIDGET_TEXT] = "text",
     [WIDGET_INDOOR] = "indoor", [WIDGET_OUTDOOR] = "outdoor", [WIDGET_LIGHTS] = "lights",
     [WIDGET_SUN] = "sun", [WIDGET_WAKE] = "wake", [WIDGET_EVENT] = "event", [WIDGET_MOON] = "moon",
-    [WIDGET_THERMOSTAT] = "thermostat",
+    [WIDGET_THERMOSTAT] = "thermostat", [WIDGET_RAIN] = "rain", [WIDGET_HUMIDITY] = "humidity",
+    [WIDGET_WIND] = "wind", [WIDGET_COUNTDOWN] = "countdown",
 };
 const char *const projector_styles[STYLE_COUNT] = {
     [STYLE_LABEL_VALUE] = "label_value", [STYLE_VALUE] = "value", [STYLE_ICON_VALUE] = "icon_value",
+};
+const char *const projector_slots[SLOT_COUNT] = {
+    [SLOT_TOP] = "top", [SLOT_RIGHT] = "right", [SLOT_BOTTOM] = "bottom", [SLOT_LEFT] = "left",
 };
 const char *const projector_sizes[SIZE_COUNT] = {
     [SIZE_NORMAL] = "normal", [SIZE_SMALL] = "small", [SIZE_LARGE] = "large",
 };
 const char *const projector_palettes[PALETTE_COUNT] = {
     [PALETTE_COLOR] = "color", [PALETTE_MONO] = "mono", [PALETTE_RED] = "red",
+};
+const char *const projector_message_levels[MESSAGE_LEVEL_COUNT] = {
+    [MESSAGE_INFO] = "info", [MESSAGE_WARNING] = "warning", [MESSAGE_ALERT] = "alert",
 };
 
 /* Index of name in names, or -1. */

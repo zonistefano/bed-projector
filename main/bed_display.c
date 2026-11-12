@@ -15,6 +15,7 @@
 #include "esp_lvgl_port.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
@@ -43,11 +44,22 @@ static void apply_orientation(unsigned rotation, bool mirror)
     lv_obj_invalidate(lv_screen_active());
 }
 
-/* The projection LED level: calibration needs enough light to see the edges. */
-static uint8_t led_level(const projector_snapshot_t *s, bool provisioning)
+/* The projection LED level: calibration needs enough light to see the edges, a blinking message
+ * pulses even with the projection off, and the light rises before an alarm and may pulse at it.
+ * These change faster than the pages, so they are computed here and never redraw the display. */
+static uint8_t led_level(const projector_snapshot_t *s, bool provisioning, int64_t now_us)
 {
     if (s->calibration.active && !provisioning) return s->brightness < 30 ? 30 : s->brightness;
-    return s->power ? s->brightness : 0;
+    if (s->message.active && s->message.blink && !provisioning)
+        return projector_pulse_level(s->brightness, (now_us - s->message.shown_us) / 1000);
+    uint8_t level = s->power ? s->brightness : 0;
+    if (s->wake_phase == WAKE_SUNRISE) {
+        uint8_t rising = projector_sunrise_level((s->wake_at_us - now_us) / 1000, s->wake_ramp_ms, s->brightness);
+        return rising > level ? rising : level;
+    }
+    if (s->wake_phase == WAKE_RINGING && s->wake.blink)
+        return projector_pulse_level(s->brightness, (now_us - s->wake_at_us) / 1000);
+    return level;
 }
 
 static void display_task(void *argument)
@@ -63,7 +75,7 @@ static void display_task(void *argument)
         projector_snapshot(&snapshot);
         const char *ap_ssid = NULL, *ap_password = NULL;
         bool provisioning = bed_net_ap_credentials(&ap_ssid, &ap_password);
-        int level = led_level(&snapshot, provisioning);
+        int level = led_level(&snapshot, provisioning, esp_timer_get_time());
         if (level != last_level) {
             set_pwm(level);
             last_level = level;

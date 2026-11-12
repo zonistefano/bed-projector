@@ -166,6 +166,69 @@ static void list_values(projector_snapshot_t *s)
     snprintf(s->pages[4].widgets[3].text, sizeof(s->pages[4].widgets[3].text), "Buonanotte");
     s->pages[4].show[LIST_HEADER] = SHOW_OFF;
 }
+static void list_outdoor(projector_snapshot_t *s)
+{
+    list_widgets(s, (const int[]){WIDGET_RAIN, WIDGET_HUMIDITY, WIDGET_WIND, WIDGET_COUNTDOWN},
+                 STYLE_ICON_VALUE, 4);
+    snprintf(s->pages[4].widgets[3].text, sizeof(s->pages[4].widgets[3].text), "2026-12-24 Natale");
+}
+static void list_outdoor_labels(projector_snapshot_t *s)
+{
+    list_outdoor(s);
+    for (int i = 0; i < 4; ++i) s->pages[4].widgets[i].style = STYLE_LABEL_VALUE;
+}
+static void message_warning(projector_snapshot_t *s) { s->message.level = MESSAGE_WARNING; }
+static void message_alert(projector_snapshot_t *s) { s->message.level = MESSAGE_ALERT; }
+/* A watch face in place of the list page, or of the clock as the first page. */
+static void face(projector_snapshot_t *s, int index, int dial, int marks, int count)
+{
+    static const projector_widget_t slots[] = {
+        {.type=WIDGET_WEATHER, .style=STYLE_ICON_VALUE, .slot=SLOT_TOP},
+        {.type=WIDGET_DATE, .style=STYLE_ICON_VALUE, .slot=SLOT_RIGHT},
+        {.type=WIDGET_WAKE, .style=STYLE_ICON_VALUE, .slot=SLOT_BOTTOM},
+        {.type=WIDGET_INDOOR, .style=STYLE_ICON_VALUE, .slot=SLOT_LEFT},
+    };
+    projector_page_t *page = &s->pages[index];
+    *page = (projector_page_t){.layout=LAYOUT_FACE, .widget_count=count};
+    snprintf(page->id, sizeof(page->id), "%s", index ? "face" : "clock");
+    snprintf(page->name, sizeof(page->name), "Quadrante");
+    page->show[FACE_DIAL] = dial;
+    page->show[FACE_MARKS] = marks;
+    for (int i = 0; i < count; ++i) page->widgets[i] = slots[i];
+}
+static void face_analog(projector_snapshot_t *s) { face(s, 4, DIAL_ANALOG, MARKS_TICKS, 4); }
+static void face_numbers(projector_snapshot_t *s) { face(s, 4, DIAL_ANALOG, MARKS_NUMBERS, 4); }
+static void face_plain(projector_snapshot_t *s) { face(s, 0, DIAL_ANALOG, MARKS_NUMBERS, 0); }
+static void face_two(projector_snapshot_t *s)
+{
+    face(s, 0, DIAL_ANALOG, MARKS_TICKS, 0);
+    s->pages[0].widget_count = 2;
+    s->pages[0].widgets[0] = (projector_widget_t){.type=WIDGET_SUN, .style=STYLE_ICON_VALUE, .slot=SLOT_TOP};
+    s->pages[0].widgets[1] = (projector_widget_t){.type=WIDGET_THERMOSTAT, .style=STYLE_VALUE,
+                                                  .slot=SLOT_BOTTOM};
+}
+static void face_digital(projector_snapshot_t *s) { face(s, 0, DIAL_DIGITAL, MARKS_TICKS, 4); }
+static void face_digital_plain(projector_snapshot_t *s) { face(s, 4, DIAL_DIGITAL, MARKS_OFF, 4); }
+static void face_red(projector_snapshot_t *s)
+{
+    face(s, 0, DIAL_ANALOG, MARKS_TICKS, 4);
+    s->theme.palette = PALETTE_RED;
+}
+static void wake_ringing(projector_snapshot_t *s)
+{
+    s->wake = (projector_wake_t){.sunrise=15, .screen=5};
+    s->wake_phase = WAKE_RINGING;
+}
+static void wake_ringing_red(projector_snapshot_t *s)
+{
+    wake_ringing(s);
+    s->theme.palette = PALETTE_RED;
+}
+static void wake_ringing_alert(projector_snapshot_t *s)
+{
+    wake_ringing(s);
+    s->message.level = MESSAGE_ALERT;
+}
 static void theme_red(projector_snapshot_t *s) { s->theme.palette = PALETTE_RED; }
 static void theme_mono(projector_snapshot_t *s)
 {
@@ -245,7 +308,7 @@ int main(int argc, char **argv)
     bed_ui_create(lv_screen_active());
 
     /* 2026-10-10 14:35 and 22:10 local time. */
-    const time_t afternoon = 1791635700, night = 1791663000;
+    const time_t afternoon = 1791635700, night = 1791663000, morning = 1791693900; /* And 2026-10-11 06:45. */
     const struct {
         const char *name;
         int page;
@@ -316,6 +379,30 @@ int main(int argc, char **argv)
         {"set_list_icons_96", 4, true, afternoon, 96, list_icons},
         {"set_list_values", 4, true, afternoon, 112, list_values},
         {"set_list_no_dots", 4, true, afternoon, 112, no_dots},
+        {"message_warning", 1, false, afternoon, 112, message_warning, "Batteria sensore scarica"},
+        {"message_alert", 1, false, afternoon, 112, message_alert,
+         "Allarme fumo in cucina: controlla subito"},
+        {"message_alert_icon", 1, false, afternoon, 112, message_alert, "Acqua in lavanderia",
+         "washing-machine"},
+        {"face_analog", 4, true, afternoon, 112, face_analog},
+        {"face_analog_96", 4, true, afternoon, 96, face_analog},
+        {"face_analog_128", 4, true, night, 128, face_analog},
+        {"face_numbers", 4, true, night, 112, face_numbers},
+        {"face_plain", 0, false, afternoon, 112, face_plain},
+        {"face_two", 0, true, night, 112, face_two, NULL, NULL, false, 1},
+        {"face_digital", 0, true, afternoon, 112, face_digital},
+        {"face_digital_96", 0, true, afternoon, 96, face_digital},
+        {"face_digital_plain", 4, true, night, 112, face_digital_plain},
+        {"face_red", 0, true, night, 112, face_red},
+        {"face_stale", 0, true, afternoon, 112, face_red, NULL, NULL, true},
+        {"wake_screen", 2, true, morning, 112, wake_ringing},
+        {"wake_screen_96", 2, true, morning, 96, wake_ringing},
+        {"wake_screen_red_128", 2, true, morning, 128, wake_ringing_red},
+        {"wake_screen_stale", 2, true, morning, 112, wake_ringing, NULL, NULL, true},
+        {"wake_screen_quiet", 2, false, morning, 112, wake_ringing},
+        {"wake_under_alert", 2, true, afternoon, 112, wake_ringing_alert, "Fumo in cucina"},
+        {"list_outdoor", 4, true, afternoon, 112, list_outdoor},
+        {"list_outdoor_labels", 4, true, afternoon, 112, list_outdoor_labels},
     };
     for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); ++i) {
         static projector_snapshot_t s;

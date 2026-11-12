@@ -28,6 +28,8 @@
 #define COLOR_WIND 0xc8d0da
 #define COLOR_SUNRISE 0xffc860
 #define COLOR_SUNSET 0xff8c60
+#define COLOR_ALERT 0xff3030
+#define COLOR_ALERT_TEXT 0xff8a80
 
 static const lv_font_t *const clock_fonts[] = {&bed_font_clock_46, &bed_font_clock_40,
     &bed_font_clock_34, &bed_font_clock_28};
@@ -147,6 +149,14 @@ static struct {
 static struct {
     lv_obj_t *page, *icon, *lines[2];
 } message_ui;
+
+static struct {
+    lv_obj_t *page, *dial, *inner, *time, *icons[SLOT_COUNT], *values[SLOT_COUNT];
+} face_ui;
+
+static struct {
+    lv_obj_t *page, *title, *time, *weather_icon, *high, *low, *event;
+} wake_ui;
 
 /* Palette of the frame being drawn: every colour goes through paint(). */
 static projector_theme_t theme = {.palette = PALETTE_COLOR};
@@ -1289,7 +1299,16 @@ static void render_message(const projector_message_t *message, int diameter)
     int level = size_level(diameter);
     const lv_font_t *icon_font = level >= 2 ? &bed_icons_22 : &bed_icons_30;
     const lv_font_t *font = level >= 2 ? &bed_font_text_12 : &bed_font_text_14;
-    const char *icon = BED_ICON_BELL;
+    /* The level sets the icon colour and, without a chosen icon, the icon itself. */
+    static const struct {
+        const char *icon;
+        uint32_t color;
+    } levels[MESSAGE_LEVEL_COUNT] = {
+        [MESSAGE_INFO] = {BED_ICON_BELL, COLOR_LIGHT},
+        [MESSAGE_WARNING] = {BED_ICON_ALERT, COLOR_OPEN},
+        [MESSAGE_ALERT] = {BED_ICON_ALERT, COLOR_ALERT},
+    };
+    const char *icon = levels[message->level].icon;
     for (int i = 0; i < ARRAY_COUNT(message_icons); ++i)
         if (!strcmp(message->icon, message_icons[i].name)) icon = message_icons[i].icon;
 
@@ -1309,14 +1328,74 @@ static void render_message(const projector_message_t *message, int diameter)
         y = stack_top(diameter, heights, 3, gap);
     }
     int icon_width = text_width(icon, icon_font);
-    set_label(message_ui.icon, icon, icon_font, COLOR_LIGHT);
+    set_label(message_ui.icon, icon, icon_font, levels[message->level].color);
     place_on_row(message_ui.icon, icon_font, diameter / 2 - icon_width / 2, icon_width, y, heights[0]);
     y += heights[0] + gap;
-    place_marquee(message_ui.lines[0], split ? first : message->text, font, COLOR_TEXT, diameter, y,
-                  heights[1]);
+    /* An alert is red throughout, so it reads as one even at a glance. */
+    uint32_t color = message->level == MESSAGE_ALERT ? COLOR_ALERT_TEXT : COLOR_TEXT;
+    place_marquee(message_ui.lines[0], split ? first : message->text, font, color, diameter, y, heights[1]);
     y += heights[1] + gap;
     show(message_ui.lines[1], split);
-    if (split) place_marquee(message_ui.lines[1], rest, font, COLOR_TEXT, diameter, y, heights[2]);
+    if (split) place_marquee(message_ui.lines[1], rest, font, color, diameter, y, heights[2]);
+}
+
+/* ---- Good morning screen: greeting, time, today's forecast and first event, from the alarm on. ---- */
+
+static void render_wake(const projector_snapshot_t *s, const struct tm *local, bool valid_time, int diameter)
+{
+    int level = size_level(diameter);
+    const char *greeting = valid_time && local->tm_hour >= 18 ? "Buonasera" : "Buongiorno";
+    row_item_t title_row[1] = {{wake_ui.title, greeting, text_fonts, ARRAY_COUNT(text_fonts), level >= 2 ? 2 : 1,
+                                COLOR_WARM, 0}};
+    char time_text[8] = "--:--";
+    if (valid_time) snprintf(time_text, sizeof(time_text), "%02d:%02d", local->tm_hour, local->tm_min);
+    row_item_t time_row[1] = {{wake_ui.time, time_text, clock_fonts, ARRAY_COUNT(clock_fonts), level + 2,
+                               COLOR_TEXT, 0}};
+
+    /* Today's forecast as on the clock page; unknown shows as a grey "?" rather than a guess. */
+    const projector_day_t *day = forecast_day(s, local, valid_time, 0);
+    weather_look_t look;
+    bool weather = day && weather_look(day->condition, false, &look);
+    char high[12], low[12];
+    degrees(high, sizeof(high), weather && day->high_known, weather ? day->high : 0);
+    degrees(low, sizeof(low), weather && day->low_known, weather ? day->low : 0);
+    row_item_t weather_row[3] = {
+        {wake_ui.weather_icon, weather ? look.icon : BED_ICON_HELP_CIRCLE_OUTLINE, icon_fonts,
+         ARRAY_COUNT(icon_fonts), level + 2, weather ? look.color : COLOR_DIM, 0},
+        {wake_ui.high, high, bold_fonts, ARRAY_COUNT(bold_fonts), level + 2, weather ? COLOR_WARM : COLOR_DIM, 5},
+        {wake_ui.low, low, bold_fonts, ARRAY_COUNT(bold_fonts), level + 2, weather ? COLOR_COOL : COLOR_DIM, 6},
+    };
+
+    /* The first of today's events: HA sends them in order, from now to the end of tomorrow. */
+    char event[64];
+    uint32_t event_color = COLOR_TEXT;
+    char today[11] = "";
+    if (valid_time) projector_date_after(local->tm_year + 1900, local->tm_mon + 1, local->tm_mday, 0, today);
+    const projector_event_t *first = NULL;
+    for (int i = 0; s->ha_fresh && s->ha.events_known && !first && i < s->ha.event_count; ++i)
+        if (!strcmp(s->ha.events[i].date, today)) first = &s->ha.events[i];
+    if (!s->ha_fresh || !s->ha.events_known) {
+        snprintf(event, sizeof(event), "Eventi ?");
+        event_color = COLOR_DIM;
+    } else if (first) {
+        snprintf(event, sizeof(event), "%s%s%s", first->time, first->time[0] ? " " : "", first->title);
+    } else {
+        snprintf(event, sizeof(event), "Nessun evento");
+        event_color = COLOR_MUTED;
+    }
+    const lv_font_t *event_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
+
+    int heights[4] = {row_height(title_row, 1), row_height(time_row, 1), row_height(weather_row, 3),
+                      ink_height(event_font)};
+    int gap = level >= 2 ? 4 : 6;
+    int y = stack_top(diameter, heights, 4, gap);
+    layout_row(title_row, 1, diameter, y, heights[0]);
+    y += heights[0] + gap;
+    layout_row(time_row, 1, diameter, y, heights[1]);
+    y += heights[1] + gap;
+    layout_row(weather_row, 3, diameter, y, heights[2]);
+    y += heights[2] + gap;
+    place_marquee(wake_ui.event, event, event_font, event_color, diameter, y, heights[3]);
 }
 
 /* ---- Page indicator: one square per page at the bottom of the circle. ---- */
@@ -1484,6 +1563,52 @@ static void text_widget(const projector_widget_t *widget, const projector_snapsh
         out->icon = BED_ICON_WEATHER_NIGHT;
         out->icon_color = 0x9aa8ff;
         break;
+    case WIDGET_RAIN: {
+        const projector_day_t *today = forecast_day(s, local, valid_time, 0);
+        snprintf(label, label_size, "Pioggia ");
+        if (today && today->precipitation >= 0) snprintf(value, size, "%d%%", today->precipitation);
+        else snprintf(value, size, "?");
+        out->icon = BED_ICON_UMBRELLA;
+        out->icon_color = today && today->precipitation >= 0 ? COLOR_RAIN : COLOR_DIM;
+        break;
+    }
+    case WIDGET_HUMIDITY: {
+        bool known = s->ha_fresh && s->ha.humidity >= 0;
+        snprintf(label, label_size, "Umidit\xC3\xA0 ");
+        if (known) snprintf(value, size, "%d%%", s->ha.humidity);
+        else snprintf(value, size, "?");
+        out->icon = BED_ICON_WATER_PERCENT;
+        out->icon_color = known ? COLOR_RAIN : COLOR_DIM;
+        break;
+    }
+    case WIDGET_WIND: {
+        bool known = s->ha_fresh && s->ha.wind[0];
+        snprintf(label, label_size, "Vento ");
+        snprintf(value, size, "%s", known ? s->ha.wind : "?");
+        out->icon = BED_ICON_WEATHER_WINDY;
+        out->icon_color = known ? COLOR_WIND : COLOR_DIM;
+        break;
+    }
+    case WIDGET_COUNTDOWN: {
+        int year, month, day;
+        const char *name = "";
+        bool parsed = projector_parse_countdown(widget->text, &year, &month, &day, &name);
+        if (name[0]) snprintf(label, label_size, "%.20s: ", name);
+        out->icon = BED_ICON_CALENDAR;
+        out->icon_color = COLOR_WARM;
+        if (!parsed || !valid_time) {
+            snprintf(value, size, "?");
+            break;
+        }
+        long days = projector_days_between(local->tm_year + 1900, local->tm_mon + 1, local->tm_mday,
+                                           year, month, day);
+        if (days == 0) snprintf(value, size, "oggi");
+        else if (days == 1) snprintf(value, size, "domani");
+        else if (days > 1) snprintf(value, size, "%ld giorni", days);
+        else if (days == -1) snprintf(value, size, "ieri");
+        else snprintf(value, size, "%ld giorni fa", -days);
+        break;
+    }
     default: { /* WIDGET_ENTITY1-4 */
         int index = widget->type - WIDGET_ENTITY1;
         snprintf(value, size, "%s", s->ha_fresh && s->ha.extras[index][0] ? s->ha.extras[index] : "Dato HA ?");
@@ -1548,6 +1673,417 @@ static void render_list(const projector_snapshot_t *s, const projector_page_t *p
     for (char *c = header; *c; ++c) if (*c >= 'a' && *c <= 'z') *c -= 'a' - 'A';
     render_lines(page->show[LIST_HEADER] == SHOW_ON ? header : NULL, texts, icons, colors, page->widget_count,
                  projector_size_level(size_level(diameter), page->size), diameter);
+}
+
+/* ---- Watch face: hands or the digital time, with up to four complications. ---- */
+
+#define FACE_SAMPLES 3 /* Per axis, as on the thermostat dial. */
+#define COLOR_MINUTE_TICK 0x5a6472
+
+/* A complication as the face shows it: a short value, with an icon unless the style is
+ * value only; long values are cut with an ellipsis rather than scrolled. */
+typedef struct {
+    bool used;
+    const char *icon;
+    uint32_t icon_color, color;
+    char value[48];
+} complication_t;
+
+/* Everything the analog face drawing depends on: redrawn only when it changes. */
+typedef struct {
+    int diameter, level;
+    bool hands;       /* Analog; the digital face draws only its marks here. */
+    int minutes;      /* Minutes since midnight, or -1 before the clock is set. */
+    uint8_t marks;    /* MARKS_* */
+    bool dots;        /* Leave room for the page dots at six o'clock. */
+    uint8_t palette;
+    uint32_t tint;
+    complication_t slots[SLOT_COUNT];
+} face_t;
+
+/* Cut text with an ellipsis, on a character boundary, until it fits width. */
+static void fit_text(char *text, size_t size, const lv_font_t *font, int width)
+{
+    if (text_width(text, font) <= width) return;
+    size_t length = strlen(text);
+    while (length > 0) {
+        do --length; while (length > 0 && ((unsigned char)text[length] & 0xc0) == 0x80);
+        while (length > 0 && text[length - 1] == ' ') --length;
+        if (length + 4 > size) continue;
+        memcpy(text + length, "\xE2\x80\xA6", 4); /* "…" and the terminator. */
+        if (text_width(text, font) <= width) return;
+    }
+    snprintf(text, size, "\xE2\x80\xA6");
+}
+
+/* The short form of a widget for a face slot: the figure that matters, not the sentence. */
+static void face_complication(const projector_widget_t *widget, const projector_snapshot_t *s,
+                              const struct tm *local, bool valid_time, complication_t *out)
+{
+    widget_text_t text;
+    text_widget(widget, s, local, valid_time, &text);
+    *out = (complication_t){.used = true, .icon_color = text.icon_color, .color = COLOR_TEXT};
+    out->icon = widget->style == STYLE_VALUE ? NULL : text.icon;
+    snprintf(out->value, sizeof(out->value), "%.47s", text.value);
+    if (widget->style == STYLE_LABEL_VALUE && !text.icon)
+        snprintf(out->value, sizeof(out->value), "%.23s%.24s", text.label, text.value);
+    switch (widget->type) {
+    case WIDGET_WEATHER:
+        if (s->ha_fresh && s->ha.temperature[0])
+            snprintf(out->value, sizeof(out->value), "%s", s->ha.temperature);
+        break;
+    case WIDGET_DATE:
+        if (valid_time)
+            snprintf(out->value, sizeof(out->value), "%s %d", weekdays[local->tm_wday], local->tm_mday);
+        break;
+    case WIDGET_WAKE:
+        if (s->ha_fresh && s->ha.wake_known && s->ha.wake_date[0])
+            snprintf(out->value, sizeof(out->value), "%s", s->ha.wake_time);
+        else if (s->ha_fresh && s->ha.wake_known) snprintf(out->value, sizeof(out->value), "--:--");
+        break;
+    case WIDGET_SUN: {
+        /* The next of today's sunrise and sunset, then tomorrow's sunrise. */
+        char now[6] = "";
+        if (valid_time) snprintf(now, sizeof(now), "%02d:%02d", local->tm_hour, local->tm_min);
+        const projector_day_t *today = forecast_day(s, local, valid_time, 0);
+        const projector_day_t *tomorrow = forecast_day(s, local, valid_time, 1);
+        const char *time = NULL;
+        if (today && today->sunrise[0] && strcmp(now, today->sunrise) < 0) time = today->sunrise;
+        else if (today && today->sunset[0] && strcmp(now, today->sunset) < 0) {
+            time = today->sunset;
+            out->icon = widget->style == STYLE_VALUE ? NULL : BED_ICON_SUNSET;
+            out->icon_color = COLOR_SUNSET;
+        } else if (tomorrow && tomorrow->sunrise[0]) time = tomorrow->sunrise;
+        snprintf(out->value, sizeof(out->value), "%s", time ? time : "?");
+        break;
+    }
+    case WIDGET_THERMOSTAT: {
+        const projector_thermostat_t *t = &s->ha.thermostat;
+        if (s->ha_fresh && t->known && strcmp(t->mode, "off") && t->target != PROJECTOR_UNKNOWN_TENTHS) {
+            projector_format_tenths(t->target, out->value, sizeof(out->value) - 2);
+            strcat(out->value, "\xC2\xB0");
+        }
+        break;
+    }
+    case WIDGET_OPENINGS:
+    case WIDGET_LIGHTS:
+        if (widget->style != STYLE_VALUE) out->color = text.icon_color;
+        break;
+    }
+    if (!strcmp(out->value, "?")) out->color = COLOR_DIM;
+}
+
+/* Colour of one sample of the marks around the rim at (x, y) from the centre, or 0. */
+static uint32_t face_mark(const face_t *f, float x, float y, float outer, float length)
+{
+    float radius = sqrtf(x * x + y * y);
+    if (radius > outer || radius < outer - length) return 0;
+    /* Clockwise from twelve o'clock, in minutes. */
+    float angle = atan2f(x, -y);
+    if (angle < 0) angle += 6.28318531f;
+    int minute = (int)(angle / 6.28318531f * 60 + 0.5f) % 60;
+    float offset = fabsf(sinf(angle - minute * 6.28318531f / 60)) * radius;
+    bool hour = minute % 5 == 0, quarter = minute % 15 == 0;
+    if (f->dots && minute >= 28 && minute <= 32) return 0;
+    if (f->marks == MARKS_NUMBERS && quarter && !f->slots[minute / 15].used) return 0;
+    if (hour) {
+        float width = quarter ? 1.3f : 0.9f;
+        return offset <= width ? (quarter ? COLOR_TEXT : COLOR_MUTED) : 0;
+    }
+    return offset <= 0.5f && radius >= outer - length * 0.45f ? COLOR_MINUTE_TICK : 0;
+}
+
+/* Coverage, 0-1, of a capsule from the centre back by tail and out to (dx, dy), half_width wide. */
+static float hand_cover(float x, float y, float dx, float dy, float tail, float half_width)
+{
+    float length = sqrtf(dx * dx + dy * dy);
+    float ux = dx / length, uy = dy / length;
+    /* Most pixels are far from the hand: one test at the centre skips the samples. */
+    float along = x * ux + y * uy;
+    along = along < -tail ? -tail : along > length ? length : along;
+    float cx = x - along * ux, cy = y - along * uy;
+    if (cx * cx + cy * cy > (half_width + 1) * (half_width + 1)) return 0;
+    int inside = 0;
+    for (int sy = 0; sy < FACE_SAMPLES; ++sy)
+        for (int sx = 0; sx < FACE_SAMPLES; ++sx) {
+            float px = x + (sx + 0.5f) / FACE_SAMPLES - 0.5f, py = y + (sy + 0.5f) / FACE_SAMPLES - 0.5f;
+            float along = px * ux + py * uy;
+            if (along < -tail) along = -tail;
+            if (along > length) along = length;
+            float ex = px - along * ux, ey = py - along * uy;
+            if (ex * ex + ey * ey <= half_width * half_width) ++inside;
+        }
+    return (float)inside / (FACE_SAMPLES * FACE_SAMPLES);
+}
+
+static uint32_t mix(uint32_t from, uint32_t to, float amount)
+{
+    uint32_t out = 0;
+    for (int shift = 0; shift <= 16; shift += 8) {
+        float a = (from >> shift) & 0xff, b = (to >> shift) & 0xff;
+        out |= (uint32_t)(a + (b - a) * amount + 0.5f) << shift;
+    }
+    return out;
+}
+
+/* Draw text centred on (cx, row y..y+height) in the canvas layer. text must live until the
+ * layer is finished. */
+static void face_text(lv_layer_t *layer, const char *text, const lv_font_t *font, uint32_t color, int cx,
+                      int y, int height)
+{
+    lv_draw_label_dsc_t dsc;
+    lv_draw_label_dsc_init(&dsc);
+    dsc.text = text;
+    dsc.font = font;
+    dsc.color = lv_color_hex(paint(color));
+    dsc.align = LV_TEXT_ALIGN_CENTER;
+    int width = text_width(text, font) + 2;
+    ink_t ink = ink_of(font);
+    int top = y + height / 2 - (ink.top + ink.bottom) / 2;
+    lv_area_t area = {cx - width / 2, top, cx - width / 2 + width - 1, top + lv_font_get_line_height(font) - 1};
+    lv_draw_label(layer, &dsc, &area);
+}
+
+static void draw_face(const face_t *f)
+{
+    static face_t drawn;
+    if (canvas_owner == face_ui.dial && !memcmp(&drawn, f, sizeof(drawn))) return;
+    canvas_owner = face_ui.dial;
+    drawn = *f;
+    int size = f->diameter;
+    float centre = size / 2.0f, outer = size / 2.0f - 2, mark_length = size / 16.0f;
+    lv_canvas_set_buffer(face_ui.dial, lv_draw_buf_align(canvas_buffer, LV_COLOR_FORMAT_RGB565),
+                         size, size, LV_COLOR_FORMAT_RGB565);
+    lv_canvas_fill_bg(face_ui.dial, lv_color_black(), LV_OPA_COVER);
+
+    /* Marks around the rim. */
+    if (f->marks != MARKS_OFF)
+        for (int py = 0; py < size; ++py)
+            for (int px = 0; px < size; ++px) {
+                float x = px + 0.5f - centre, y = py + 0.5f - centre;
+                float distance = sqrtf(x * x + y * y);
+                if (distance > outer + 1 || distance < outer - mark_length - 1) continue;
+                uint32_t r = 0, g = 0, b = 0;
+                for (int sy = 0; sy < FACE_SAMPLES; ++sy)
+                    for (int sx = 0; sx < FACE_SAMPLES; ++sx) {
+                        uint32_t color = face_mark(f, px + (sx + 0.5f) / FACE_SAMPLES - centre,
+                                                   py + (sy + 0.5f) / FACE_SAMPLES - centre, outer, mark_length);
+                        r += color >> 16;
+                        g += (color >> 8) & 0xff;
+                        b += color & 0xff;
+                    }
+                const int samples = FACE_SAMPLES * FACE_SAMPLES;
+                if (r || g || b)
+                    lv_canvas_set_px(face_ui.dial, px, py,
+                                     lv_color_hex(paint((r / samples) << 16 | (g / samples) << 8 | b / samples)),
+                                     LV_OPA_COVER);
+            }
+
+    /* Numbers and complications, under the hands. */
+    lv_layer_t layer;
+    lv_canvas_init_layer(face_ui.dial, &layer);
+    const lv_font_t *number_font = bold_fonts[f->level >= 2 ? 3 : 2];
+    if (f->marks == MARKS_NUMBERS) {
+        /* In slot order; a complication takes the place of the number beside it. */
+        static const char *const numbers[SLOT_COUNT] = {[SLOT_TOP] = "12", [SLOT_RIGHT] = "3",
+                                                        [SLOT_BOTTOM] = "6", [SLOT_LEFT] = "9"};
+        float reach = outer - ink_height(number_font) / 2.0f - 2;
+        for (int i = 0; i < SLOT_COUNT; ++i) {
+            if ((i == SLOT_BOTTOM && f->dots) || f->slots[i].used) continue;
+            int dx = i == 1 ? 1 : i == 3 ? -1 : 0, dy = i == 0 ? -1 : i == 2 ? 1 : 0;
+            int height = ink_height(number_font);
+            int extra = dx ? text_width(numbers[i], number_font) / 2 - height / 2 : 0;
+            face_text(&layer, numbers[i], number_font, COLOR_TEXT, (int)(centre + dx * (reach - extra)),
+                      (int)(centre + dy * reach) - height / 2, height);
+        }
+    }
+    const lv_font_t *icon_font = f->level >= 2 ? &bed_icons_12 : &bed_icons_14;
+    const lv_font_t *value_font = f->level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
+    int icon_height = ink_height(icon_font), value_height = ink_height(value_font), gap = 2;
+    float reach = size * (f->marks == MARKS_NUMBERS ? 0.23f : 0.25f);
+    for (int slot = 0; slot < SLOT_COUNT; ++slot) {
+        const complication_t *c = &f->slots[slot];
+        if (!c->used) continue;
+        int cx = (int)(centre + (slot == SLOT_RIGHT ? reach : slot == SLOT_LEFT ? -reach : 0));
+        int cy = (int)(centre + (slot == SLOT_BOTTOM ? reach : slot == SLOT_TOP ? -reach : 0));
+        int height = (c->icon ? icon_height + gap : 0) + value_height;
+        int y = cy - height / 2;
+        if (c->icon) {
+            face_text(&layer, c->icon, icon_font, c->icon_color, cx, y, icon_height);
+            y += icon_height + gap;
+        }
+        face_text(&layer, c->value, value_font, c->color, cx, y, value_height);
+    }
+    if (f->hands && f->minutes < 0)
+        face_text(&layer, "--:--", bold_fonts[2], COLOR_DIM, (int)centre,
+                  (int)centre - ink_height(bold_fonts[2]) / 2, ink_height(bold_fonts[2]));
+    lv_canvas_finish_layer(face_ui.dial, &layer);
+    if (!f->hands || f->minutes < 0) return;
+
+    /* Hands over everything, with a black rim that keeps them apart from the text below. */
+    float hour_x, hour_y, minute_x, minute_y;
+    projector_hand_end(f->minutes % 720, 720, size * 0.27f, &hour_x, &hour_y);
+    projector_hand_end(f->minutes % 60, 60, size * 0.40f, &minute_x, &minute_y);
+    float tail = size * 0.06f, hour_width = size / 56.0f + 0.4f, minute_width = size / 80.0f + 0.4f;
+    int reach_px = (int)(size * 0.40f) + 3;
+    for (int py = (int)centre - reach_px; py <= (int)centre + reach_px; ++py)
+        for (int px = (int)centre - reach_px; px <= (int)centre + reach_px; ++px) {
+            if (px < 0 || py < 0 || px >= size || py >= size) continue;
+            float x = px + 0.5f - centre, y = py + 0.5f - centre;
+            float rim = hand_cover(x, y, hour_x, hour_y, tail, hour_width + 1);
+            float minute_rim = hand_cover(x, y, minute_x, minute_y, tail, minute_width + 1);
+            if (minute_rim > rim) rim = minute_rim;
+            if (rim <= 0) continue;
+            lv_color32_t old = lv_canvas_get_px(face_ui.dial, px, py);
+            uint32_t color = mix((uint32_t)old.red << 16 | (uint32_t)old.green << 8 | old.blue, 0, rim);
+            color = mix(color, paint(COLOR_TEXT), hand_cover(x, y, hour_x, hour_y, tail, hour_width));
+            color = mix(color, paint(COLOR_TEXT), hand_cover(x, y, minute_x, minute_y, tail, minute_width));
+            float d = sqrtf(x * x + y * y), cap = hour_width + 1.2f;
+            if (d <= cap + 0.5f) color = mix(color, paint(COLOR_WARM), d <= cap - 0.5f ? 1 : cap + 0.5f - d);
+            if (d <= 1.0f) color = 0;
+            lv_canvas_set_px(face_ui.dial, px, py, lv_color_hex(color), LV_OPA_COVER);
+        }
+}
+
+/* Digital: a row per complication above and below the time, left and right side by side below it. */
+static void render_face_digital(complication_t *slots, const char *time, int level, int diameter, int inset)
+{
+    int inner = diameter - 2 * inset;
+    set_area(face_ui.inner, inset, inset, inner, inner);
+    /* Rows of complications: the top one, left and right together, the bottom one. */
+    row_item_t rows[3][4];
+    int counts[3] = {0}, heights[4];
+    static const int row_of[SLOT_COUNT] = {[SLOT_TOP] = 0, [SLOT_RIGHT] = 1, [SLOT_BOTTOM] = 2, [SLOT_LEFT] = 1};
+    static const int order[SLOT_COUNT] = {SLOT_TOP, SLOT_LEFT, SLOT_RIGHT, SLOT_BOTTOM};
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        int slot = order[i], row = row_of[slot];
+        const complication_t *c = &slots[slot];
+        show(face_ui.icons[slot], false);
+        show(face_ui.values[slot], false);
+        if (!c->used) continue;
+        int gap = counts[row] ? 10 : 0;
+        if (c->icon) {
+            rows[row][counts[row]++] = (row_item_t){face_ui.icons[slot], c->icon, icon_fonts,
+                ARRAY_COUNT(icon_fonts), level >= 2 ? 4 : 3, c->icon_color, gap};
+            gap = 3;
+        }
+        rows[row][counts[row]++] = (row_item_t){face_ui.values[slot], c->value, text_fonts,
+            ARRAY_COUNT(text_fonts), level >= 2 ? 2 : 1, c->color, gap};
+    }
+    /* With complications above and below, a smaller time keeps their rows away from the narrow rim. */
+    int crowded = (counts[0] > 0) + (counts[1] > 0) + (counts[2] > 0) >= 2;
+    row_item_t time_row[1] = {{face_ui.time, time, clock_fonts, ARRAY_COUNT(clock_fonts), level + 1 + crowded,
+                               COLOR_TEXT, 0}};
+    heights[0] = counts[0] ? row_height(rows[0], counts[0]) : 0;
+    heights[1] = row_height(time_row, 1);
+    heights[2] = counts[1] ? row_height(rows[1], counts[1]) : 0;
+    heights[3] = counts[2] ? row_height(rows[2], counts[2]) : 0;
+    int gap = crowded ? (level >= 2 ? 3 : 4) : level >= 2 ? 5 : 7;
+    int reserve = bottom_reserve;
+    bottom_reserve = reserve > inset ? reserve - inset : 0;
+    int y = stack_top(inner, heights, 4, gap);
+    bottom_reserve = reserve;
+    row_item_t *const all[4] = {rows[0], time_row, rows[1], rows[2]};
+    int all_counts[4] = {counts[0], 1, counts[1], counts[2]};
+    for (int i = 0; i < 4; ++i) {
+        if (!heights[i]) continue;
+        /* Widths at the smallest fonts layout_row may step down to. */
+        int available = circle_half_width(inner, y, heights[i]) * 2, icons = 0, values = 0, used = 0;
+        for (int j = 0; i != 1 && j < all_counts[i]; ++j) {
+            const row_item_t *item = &all[i][j];
+            int width = text_width(item->text, item_font(item, ARRAY_COUNT(icon_fonts)));
+            used += item->gap + width;
+            if (item->fonts == icon_fonts) icons += width + item->gap;
+            else ++values;
+        }
+        /* Two complications side by side drop their icons before their values are cut. */
+        if (values > 1 && icons && used > available) {
+            int kept = 0;
+            for (int j = 0; j < all_counts[i]; ++j)
+                if (all[i][j].fonts == text_fonts) {
+                    all[i][kept] = all[i][j];
+                    all[i][kept].gap = kept ? 10 : 0;
+                    ++kept;
+                }
+            all_counts[i] = kept;
+        }
+        /* Values share what the circle leaves of the row: only what still does not fit is cut. */
+        for (int j = 0; i != 1 && j < all_counts[i]; ++j) {
+            const row_item_t *item = &all[i][j];
+            available -= item->gap;
+            if (item->fonts == icon_fonts)
+                available -= text_width(item->text, item_font(item, ARRAY_COUNT(icon_fonts)));
+        }
+        /* A value may use what the others leave: each of them takes at most an even share. */
+        int share = values ? available / values : 0;
+        for (int j = 0; i != 1 && values && j < all_counts[i]; ++j) {
+            const row_item_t *item = &all[i][j];
+            if (item->fonts != text_fonts) continue;
+            int limit = available;
+            for (int k = 0; k < all_counts[i]; ++k) {
+                const row_item_t *other = &all[i][k];
+                if (k == j || other->fonts != text_fonts) continue;
+                int width = text_width(other->text, item_font(other, ARRAY_COUNT(text_fonts)));
+                limit -= width < share ? width : share;
+            }
+            for (int slot = 0; slot < SLOT_COUNT; ++slot)
+                if (item->text == slots[slot].value)
+                    fit_text(slots[slot].value, sizeof(slots[slot].value),
+                             item_font(item, ARRAY_COUNT(text_fonts)), limit);
+        }
+        layout_row(all[i], all_counts[i], inner, y, heights[i]);
+        y += heights[i] + gap;
+    }
+}
+
+static void render_face(const projector_snapshot_t *s, const projector_page_t *page, const struct tm *local,
+                        bool valid_time, bool dots, int diameter)
+{
+    int level = projector_size_level(size_level(diameter), page->size);
+    static face_t face;
+    memset(&face, 0, sizeof(face)); /* Compared with memcmp: padding must be zero too. */
+    face.diameter = diameter;
+    face.level = level;
+    face.hands = page->show[FACE_DIAL] == DIAL_ANALOG;
+    face.minutes = valid_time ? local->tm_hour * 60 + local->tm_min : -1;
+    face.marks = page->show[FACE_MARKS];
+    face.dots = dots;
+    face.palette = theme.palette;
+    face.tint = theme.tint;
+    for (int i = 0; i < page->widget_count; ++i)
+        face_complication(&page->widgets[i], s, local, valid_time, &face.slots[page->widgets[i].slot]);
+    bool analog = face.hands;
+    /* Analog complications stay between the centre and the marks. */
+    const lv_font_t *value_font = level >= 2 ? &bed_font_text_10 : &bed_font_text_12;
+    for (int slot = 0; analog && slot < SLOT_COUNT; ++slot) {
+        complication_t *c = &face.slots[slot];
+        bool vertical = slot == SLOT_TOP || slot == SLOT_BOTTOM;
+        if (c->used) fit_text(c->value, sizeof(c->value), value_font, diameter * (vertical ? 3 : 2) / 5);
+    }
+    show(face_ui.inner, !analog);
+    show(face_ui.dial, analog || face.marks != MARKS_OFF);
+    if (analog) {
+        draw_face(&face);
+        set_area(face_ui.dial, 0, 0, diameter, diameter);
+        return;
+    }
+    /* Digital: the canvas holds only the marks; numbers would crowd the rows, so they show as ticks. */
+    static face_t marks;
+    memset(&marks, 0, sizeof(marks));
+    marks.diameter = diameter;
+    marks.level = level;
+    marks.minutes = -1;
+    marks.dots = dots;
+    marks.palette = theme.palette;
+    marks.tint = theme.tint;
+    marks.marks = face.marks == MARKS_OFF ? MARKS_OFF : MARKS_TICKS;
+    if (marks.marks != MARKS_OFF) {
+        draw_face(&marks);
+        set_area(face_ui.dial, 0, 0, diameter, diameter);
+    }
+    char time[8] = "--:--";
+    if (valid_time) snprintf(time, sizeof(time), "%02d:%02d", local->tm_hour, local->tm_min);
+    render_face_digital(face.slots, time, level, diameter, marks.marks != MARKS_OFF ? diameter / 16 + 3 : 2);
 }
 
 /* ---- Calibration overlay ---- */
@@ -1646,6 +2182,24 @@ void bed_ui_create(lv_obj_t *screen)
         list_ui.lines[i] = new_label(list_ui.page, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
     }
 
+    face_ui.page = new_page();
+    /* Created first so the digital labels draw over its marks. */
+    face_ui.dial = lv_canvas_create(face_ui.page);
+    face_ui.inner = lv_obj_create(face_ui.page);
+    lv_obj_remove_style_all(face_ui.inner);
+    lv_obj_remove_flag(face_ui.inner, LV_OBJ_FLAG_SCROLLABLE);
+    face_ui.time = new_label(face_ui.inner, LV_LABEL_LONG_MODE_CLIP);
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        face_ui.icons[i] = new_label(face_ui.inner, LV_LABEL_LONG_MODE_CLIP);
+        face_ui.values[i] = new_label(face_ui.inner, LV_LABEL_LONG_MODE_CLIP);
+    }
+
+    wake_ui.page = new_page();
+    lv_obj_t **wake_labels[] = {&wake_ui.title, &wake_ui.time, &wake_ui.weather_icon, &wake_ui.high, &wake_ui.low};
+    for (int i = 0; i < ARRAY_COUNT(wake_labels); ++i)
+        *wake_labels[i] = new_label(wake_ui.page, LV_LABEL_LONG_MODE_CLIP);
+    wake_ui.event = new_label(wake_ui.page, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+
     message_ui.page = new_page();
     message_ui.icon = new_label(message_ui.page, LV_LABEL_LONG_MODE_CLIP);
     for (int i = 0; i < 2; ++i)
@@ -1704,7 +2258,11 @@ void bed_ui_render(const projector_snapshot_t *s, time_t now, const char *ap_ssi
     for (int i = 0; i < hairline_count; ++i) set_background(hairlines[i], COLOR_LINE);
     const projector_page_t *page = &s->pages[s->page_index];
     lv_obj_t *active = list_ui.page;
-    bool dots = s->theme.dots && !ap_ssid && !s->message.active && s->page_index > 0 && s->page_count > 1;
+    /* From the alarm on, the good morning screen covers the pages and all but alert messages. */
+    bool alert = s->message.active && s->message.level == MESSAGE_ALERT;
+    bool wake_screen = s->wake_phase == WAKE_RINGING && s->wake.screen && !alert;
+    bool dots = s->theme.dots && !ap_ssid && !s->message.active && !wake_screen && s->page_index > 0 &&
+        s->page_count > 1;
     bottom_reserve = dots ? diameter - dots_top(diameter) + 3 : 0;
     if (ap_ssid) {
         char password_a[9], password_b[9];
@@ -1712,6 +2270,9 @@ void bed_ui_render(const projector_snapshot_t *s, time_t now, const char *ap_ssi
         snprintf(password_b, sizeof(password_b), "%s", strlen(ap_password) > 8 ? ap_password + 8 : "");
         const char *lines[3] = {ap_ssid, password_a, password_b};
         render_lines("WI-FI AP", lines, NULL, NULL, 3, size_level(diameter), diameter);
+    } else if (wake_screen) {
+        active = wake_ui.page;
+        render_wake(s, &local, valid_time, diameter);
     } else if (s->message.active) {
         active = message_ui.page;
         render_message(&s->message, diameter);
@@ -1730,9 +2291,12 @@ void bed_ui_render(const projector_snapshot_t *s, time_t now, const char *ap_ssi
     } else if (page->layout == LAYOUT_CLIMATE) {
         active = climate_ui.page;
         render_climate(s, page, diameter);
+    } else if (page->layout == LAYOUT_FACE) {
+        active = face_ui.page;
+        render_face(s, page, &local, valid_time, dots, diameter);
     } else render_list(s, page, &local, valid_time, diameter);
     lv_obj_t *const pages[] = {clock_ui.page, home_ui.page, weather_ui.page, agenda_ui.page, climate_ui.page,
-        list_ui.page, message_ui.page};
+        list_ui.page, face_ui.page, wake_ui.page, message_ui.page};
     for (int i = 0; i < ARRAY_COUNT(pages); ++i) {
         set_area(pages[i], 0, 0, diameter, diameter);
         show(pages[i], pages[i] == active);

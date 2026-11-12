@@ -168,6 +168,70 @@ int main(void)
     assert(projector_tint(0xffffff, PALETTE_RED, 0x00ff00) == 0xff2000);
     uint32_t dim = projector_tint(0x6a7482, PALETTE_RED, 0);
     assert((dim & 0xff) == 0 && ((dim >> 8) & 0xff) < 0x10 && (dim >> 16) > 0x40 && (dim >> 16) < 0x80);
+    assert(projector_carousel_valid(0) && projector_carousel_valid(5) && projector_carousel_valid(600));
+    assert(!projector_carousel_valid(4) && !projector_carousel_valid(601) && !projector_carousel_valid(-1));
+    /* Watch hands: up at 0, right at a quarter, down at half a turn; whole turns wrap. */
+    float dx, dy;
+#define NEAR(a, b) ((a) - (b) < 0.01f && (b) - (a) < 0.01f)
+    projector_hand_end(0, 60, 40, &dx, &dy);
+    assert(NEAR(dx, 0) && NEAR(dy, -40));
+    projector_hand_end(15, 60, 40, &dx, &dy);
+    assert(NEAR(dx, 40) && NEAR(dy, 0));
+    projector_hand_end(30, 60, 40, &dx, &dy);
+    assert(NEAR(dx, 0) && NEAR(dy, 40));
+    projector_hand_end(6 * 60, 720, 20, &dx, &dy);
+    assert(NEAR(dx, 0) && NEAR(dy, 20));
+    projector_hand_end(9 * 60 + 720, 720, 20, &dx, &dy);
+    assert(NEAR(dx, -20) && NEAR(dy, 0));
+    projector_hand_end(5, 60, 10, &dx, &dy); /* 30°: x = 5, y = -8.66 */
+    assert(NEAR(dx, 5) && NEAR(dy, -8.660254f));
+    projector_hand_end(50, 60, 10, &dx, &dy); /* 300° */
+    assert(NEAR(dx, -8.660254f) && NEAR(dy, -5));
+    projector_hand_end(2 * 60 + 11, 720, 10, &dx, &dy); /* 02:11 stays on the 02:00 step. */
+    assert(NEAR(dx, 8.660254f) && NEAR(dy, -5));
+#undef NEAR
+    assert(projector_layout_index("face") == LAYOUT_FACE);
+    assert(projector_mode_index(LAYOUT_FACE, FACE_DIAL, "digital") == DIAL_DIGITAL);
+    assert(projector_name_index("left", projector_slots, SLOT_COUNT) == SLOT_LEFT);
+    /* Pulsing LED: full, dim, full again, steady after PROJECTOR_PULSE_MS. */
+    assert(projector_pulse_level(50, 0) == 50 && projector_pulse_level(50, 499) == 50);
+    assert(projector_pulse_level(50, 500) == 10 && projector_pulse_level(50, 1000) == 50);
+    assert(projector_pulse_level(3, 500) == 1);
+    assert(projector_pulse_level(50, PROJECTOR_PULSE_MS + 500) == 50);
+    assert(projector_pulse_level(50, -500) == 50);
+    assert(projector_name_index("alert", projector_message_levels, MESSAGE_LEVEL_COUNT) == MESSAGE_ALERT);
+    /* Alarm: seconds left from HA's local date and time, across midnight and the year's end. */
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 30, 0, "2026-11-12", "06:45") == 900);
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 45, 30, "2026-11-12", "06:45") == -30);
+    assert(projector_seconds_to_wake(2026, 12, 31, 23, 50, 0, "2027-01-01", "00:10") == 1200);
+    assert(projector_seconds_to_wake(2026, 11, 12, 22, 0, 0, "2026-11-13", "06:00") == 8 * 3600);
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 0, 0, "2026-11-20", "06:00") == PROJECTOR_NO_WAKE);
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 0, 0, "2026-11-12", "6:00") == PROJECTOR_NO_WAKE);
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 0, 0, "2026-11-12", "24:00") == PROJECTOR_NO_WAKE);
+    assert(projector_seconds_to_wake(2026, 11, 12, 6, 0, 0, "", "06:00") == PROJECTOR_NO_WAKE);
+    /* Sunrise: off before the ramp, 1% at its start, a quarter at half, full at the alarm. */
+    assert(projector_sunrise_level(600000, 600000, 80) == 0);
+    assert(projector_sunrise_level(599000, 600000, 80) == 1);
+    assert(projector_sunrise_level(300000, 600000, 80) == 20);
+    assert(projector_sunrise_level(1, 600000, 80) == 79);
+    assert(projector_sunrise_level(0, 600000, 80) == 80 && projector_sunrise_level(-5000, 600000, 80) == 80);
+    assert(projector_sunrise_level(1000, 0, 40) == 40);
+    /* Countdown widget text. */
+    int year, month, day;
+    const char *name;
+    assert(projector_parse_countdown("2026-12-24 Vigilia", &year, &month, &day, &name));
+    assert(year == 2026 && month == 12 && day == 24 && !strcmp(name, "Vigilia"));
+    assert(projector_parse_countdown("2028-02-29", &year, &month, &day, &name) && !strcmp(name, ""));
+    assert(!projector_parse_countdown("2027-02-29 Mai", &year, &month, &day, &name));
+    assert(!projector_parse_countdown("2026-13-01", &year, &month, &day, &name));
+    assert(!projector_parse_countdown("2026-1-01 X", &year, &month, &day, &name));
+    assert(!projector_parse_countdown("2026-12-24X", &year, &month, &day, &name));
+    assert(!projector_parse_countdown("Natale", &year, &month, &day, &name));
+    assert(!projector_parse_countdown(NULL, &year, &month, &day, &name));
+    assert(projector_days_between(2026, 12, 31, 2027, 1, 1) == 1);
+    assert(projector_days_between(2026, 11, 11, 2026, 12, 24) == 43);
+    assert(projector_days_between(2028, 3, 1, 2028, 2, 28) == -2);
+    assert(projector_days_between(2026, 5, 5, 2026, 5, 5) == 0);
     for (unsigned rotation = 0; rotation < 4; ++rotation) {
         assert_circle_fixed(rotation, false);
         assert_circle_fixed(rotation, true);

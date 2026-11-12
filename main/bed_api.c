@@ -166,6 +166,8 @@ static cJSON *status_json(void)
     cJSON_AddStringToObject(root, "page", snapshot.pages[snapshot.page_index].id);
     cJSON_AddNumberToObject(root, "page_index", snapshot.page_index);
     cJSON_AddNumberToObject(root, "page_timeout", snapshot.page_timeout);
+    cJSON_AddNumberToObject(root, "carousel", snapshot.carousel);
+    cJSON_AddStringToObject(root, "wake_phase", projector_wake_phases[snapshot.wake_phase]);
     cJSON_AddBoolToObject(root, "preview", snapshot.preview);
     cJSON_AddBoolToObject(root, "ha_fresh", snapshot.ha_fresh);
     if (ha->openings_known) cJSON_AddNumberToObject(root, "openings", ha->openings);
@@ -333,6 +335,8 @@ esp_err_t bed_api_start(void)
     static const json_route_t config_get = {NULL, config_json};
     static const json_route_t config_post = {set_config, config_json};
     static const json_route_t network = {set_network, NULL};
+    static const json_route_t wake_get = {NULL, projector_wake_json};
+    static const json_route_t wake_post = {projector_set_wake, projector_wake_json};
     static const static_file_t html = {index_html_start, index_html_end, "text/html; charset=utf-8"};
     static const static_file_t js = {index_js_start, index_js_end, "text/javascript; charset=utf-8"};
     static const static_file_t css = {index_css_start, index_css_end, "text/css; charset=utf-8"};
@@ -354,6 +358,8 @@ esp_err_t bed_api_start(void)
         JSON("/api/config", HTTP_GET, config_get),
         JSON("/api/config", HTTP_POST, config_post),
         JSON("/api/network", HTTP_POST, network),
+        JSON("/api/wake", HTTP_GET, wake_get),
+        JSON("/api/wake", HTTP_POST, wake_post),
         {.uri="/api/ota", .method=HTTP_POST, .handler=ota_handler},
         FILE_ROUTE("/", html),
         FILE_ROUTE("/index.html", html),
