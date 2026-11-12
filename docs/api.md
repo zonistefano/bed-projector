@@ -34,6 +34,8 @@ Non pubblicare il token in script condivisi o log. Il firmware compilato contien
 | POST | `/api/calibration` | JSON regolazione | Stato della regolazione aggiornato |
 | POST | `/api/ha/state` | JSON snapshot completo | `{}` |
 | POST | `/api/message` | JSON messaggio | `{}` |
+| GET | `/api/wake` | Nessuno | Impostazioni della sveglia e fase in corso |
+| POST | `/api/wake` | JSON impostazioni, oppure `{"dismiss":true}` o `{"test":true}` | Come `GET /api/wake` |
 | GET | `/api/config` | Nessuno | `{"timezone":"...","discovery":true}` |
 | POST | `/api/config` | `{"discovery":false}` | Attiva o disattiva il rilevamento da Home Assistant; risponde come `GET /api/config` |
 | POST | `/api/network` | JSON rete | `{"restarting":true}` |
@@ -57,6 +59,8 @@ Esempio di risposta:
   "page": "clock",
   "page_index": 0,
   "page_timeout": 30,
+  "carousel": 0,
+  "wake_phase": "idle",
   "preview": false,
   "ha_fresh": false,
   "openings": null,
@@ -70,11 +74,11 @@ Esempio di risposta:
 }
 ```
 
-`id` è l'indirizzo MAC Wi-Fi in 12 cifre esadecimali minuscole: non cambia mai e identifica il proiettore anche quando cambia IP. `openings:null` e `lights:null` significano conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `preview:true` indica che il proiettore mostra una prova di pagine non salvata (vedi [Prova delle pagine](#prova-delle-pagine)). `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
+`id` è l'indirizzo MAC Wi-Fi in 12 cifre esadecimali minuscole: non cambia mai e identifica il proiettore anche quando cambia IP. `openings:null` e `lights:null` significano conteggio sconosciuto; `ha_fresh:false` significa che l'ultimo snapshot ha superato i 120 secondi o non è mai arrivato. `wake_phase` è la fase della [sveglia](#sveglia): `idle`, `sunrise` o `ringing`. `preview:true` indica che il proiettore mostra una prova di pagine non salvata (vedi [Prova delle pagine](#prova-delle-pagine)). `free_heap` e `uptime_seconds` sono valori diagnostici variabili. I quattro dati aggiuntivi sono usati sul display, ma non compaiono nella risposta di stato.
 
 ## Comandi del display
 
-`POST /api/display` accetta `power`, `brightness`, `page_timeout` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
+`POST /api/display` accetta `power`, `brightness`, `page_timeout`, `carousel` e al massimo uno tra `page` e `move`. `page` e `move` non possono essere inviati insieme.
 
 ```sh
 # Spegni solo il LED di proiezione.
@@ -97,6 +101,13 @@ curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: appli
 ```sh
 curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
   -d '{"page_timeout":60}' "$PROJECTOR_URL/api/display"
+```
+
+`carousel` fa ruotare le pagine da sole, `clock` compresa, passando alla successiva ogni `carousel` secondi: `0` (predefinito) la spegne, altrimenti il valore va da 5 a 600. Mentre è accesa `page_timeout` non si applica. La rotazione aspetta mentre sono mostrati un messaggio, una prova di pagine o la calibrazione; scegliere una pagina con `page` o `move` fa ripartire il conteggio. Il valore resta salvato al riavvio ed è riportato da `GET /api/status`.
+
+```sh
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"carousel":20}' "$PROJECTOR_URL/api/display"
 ```
 
 ## Centraggio e orientamento locali
@@ -160,11 +171,11 @@ Il tema vale per tutte le pagine, per i messaggi e per la schermata dell'access 
 | --- | --- |
 | `id` | Alfanumerico o `_`, 1–16 byte, univoco |
 | `name` | 1–16 byte, senza caratteri di controllo |
-| `layout` | `clock` (solo la prima pagina, con `id:"clock"`), `home`, `weather`, `agenda`, `climate` (termostato), `list` |
+| `layout` | `clock` (solo la prima pagina, con `id:"clock"`), `home`, `weather`, `agenda`, `climate` (termostato), `list`, `face` (quadrante; anche come prima pagina, con `id:"clock"`) |
 | `size` | Dimensione del testo: `normal` (predefinito), `small`, `large`. Sui cerchi più piccoli `large` può far scorrere le righe lunghe |
 | `tomorrow_from` | Solo `clock` e `weather`: ora (0–24) da cui si mostra la previsione di domani; `24` = mai, predefinito `21`. Accettato e ignorato sulle altre pagine |
 | `show` | Modo di mostrare ogni elemento del modello (tabella sotto). Gli elementi assenti prendono il primo modo, quello predefinito |
-| `widgets` | Solo `list`: fino a 4 righe `{"widget", "style", "text"}`. Le altre pagine accettano solo un array vuoto o nessun campo |
+| `widgets` | Solo `list` e `face`: fino a 4 righe `{"widget", "style", "text"}`; su `face` ogni riga è una complicazione e ha anche `slot`. Le altre pagine accettano solo un array vuoto o nessun campo |
 
 Elementi di `show` per modello; il primo modo è il predefinito:
 
@@ -195,12 +206,27 @@ Elementi di `show` per modello; il primo modo è il predefinito:
 | | `current` | `on`, `off` (temperatura della stanza) |
 | | `humidity` | `on`, `off` |
 | `list` | `header` | `on`, `off` (nome della pagina in alto) |
+| `face` | `dial` | `analog` (lancette), `digital` (ora in cifre) |
+| | `marks` | `ticks` (tacche delle ore e dei minuti), `numbers` (12, 3, 6, 9 al posto delle tacche dei quarti; con `digital` valgono come `ticks`), `off` |
 
 Righe di `widgets`:
 
-- `widget`: `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`, `indoor`, `outdoor`, `lights`, `sun`, `wake`, `event`, `moon`, `thermostat`.
+- `widget`: `openings`, `alarm`, `date`, `weather`, `entity1`–`entity4`, `text`, `indoor`, `outdoor`, `lights`, `sun`, `wake`, `event`, `moon`, `thermostat`, `rain`, `humidity`, `wind`, `countdown`.
 - `style`: `label_value` (predefinito, es. `Luci accese: 3`), `value` (solo `3`), `icon_value` (icona e valore; `text` ed `entity1`–`entity4` non hanno icona e mostrano solo il valore).
-- `text`: solo per `widget:"text"`, al massimo 32 byte; sulle altre righe viene ignorato.
+- `text`: al massimo 32 byte, solo per `widget:"text"` e `widget:"countdown"`; sulle altre righe viene ignorato. Per `countdown` è obbligatorio e inizia con una data valida `AAAA-MM-GG`, seguita facoltativamente da uno spazio e dal nome (`"2026-12-24 Natale"`).
+
+Su una pagina `face` ogni riga di `widgets` ha anche `slot`: `top`, `right`, `bottom` o `left`, ciascuno al massimo una volta; sulle pagine `list` `slot` non è ammesso. La complicazione mostra la forma breve del dato: per esempio la sola temperatura per `weather`, `Sab 10` per `date`, l'ora per `wake`, la prossima tra alba e tramonto per `sun`, la temperatura impostata per `thermostat`. I valori troppo lunghi vengono accorciati con `…` invece di scorrere. Con `analog` un numero di `marks:"numbers"` lascia il posto alla complicazione nella stessa posizione; con `digital` le complicazioni `left` e `right` stanno affiancate sotto l'ora. Le lancette si muovono a scatti di un minuto, quella delle ore ogni 12 minuti.
+
+```json
+{"id": "clock", "name": "Ora", "layout": "face", "size": "normal",
+ "show": {"dial": "analog", "marks": "ticks"},
+ "widgets": [
+   {"widget": "weather", "style": "icon_value", "slot": "top"},
+   {"widget": "date", "style": "icon_value", "slot": "right"},
+   {"widget": "wake", "style": "icon_value", "slot": "bottom"},
+   {"widget": "indoor", "style": "icon_value", "slot": "left"}
+ ]}
+```
 
 Un JSON non valido viene rifiutato per intero senza cambiare le pagine. Il documento salvato, in forma compatta, deve stare in 4000 byte (una configurazione completa di cinque pagine ne occupa circa la metà). Se il salvataggio NVS fallisce, la configurazione mostrata resta quella di prima e la risposta è un errore.
 
@@ -299,7 +325,7 @@ Ogni elemento di `days` contiene `date` (data locale di HA, `AAAA-MM-GG`), `cond
 
 ## Messaggi
 
-`POST /api/message` mostra un messaggio temporaneo al posto della pagina corrente, finché non scade o non viene tolto. Non viene salvato: un riavvio lo cancella. La calibrazione e la schermata dell'access point hanno la precedenza.
+`POST /api/message` mostra un messaggio al posto della pagina corrente, finché non scade o non viene tolto. Non viene salvato: un riavvio lo cancella. La calibrazione e la schermata dell'access point hanno la precedenza.
 
 ```json
 {"text": "Lavatrice finita", "icon": "washing-machine", "duration": 60}
@@ -307,13 +333,43 @@ Ogni elemento di `days` contiene `date` (data locale di HA, `AAAA-MM-GG`), `cond
 
 - `text`: obbligatorio, da 1 a 63 byte UTF-8, senza caratteri di controllo.
 - `icon`: facoltativa, una tra `bell`, `information`, `alert`, `washing-machine`, `package-variant`, `door-open`, `lightbulb-on`, `phone`, `alarm`, `calendar`. Se manca compare `bell`.
-- `duration`: facoltativa, da 5 a 3600 secondi, predefinita 30.
+- `duration`: facoltativa, da 5 a 3600 secondi, predefinita 30; `0` lascia il messaggio finché non viene tolto.
+- `level`: facoltativo, `info` (predefinito), `warning` o `alert`. Colora l'icona (gialla, arancione, rossa); senza `icon`, `warning` e `alert` mostrano il triangolo di `alert`. Con `alert` anche il testo è rosso.
+- `blink`: facoltativo, `true` fa pulsare il LED (un secondo pieno e uno a un quinto della luminosità) per il primo minuto, poi la luce resta fissa finché il messaggio è mostrato. Il LED si accende anche se la proiezione è spenta; quando il messaggio sparisce torna allo stato di prima.
 
 Un nuovo messaggio sostituisce quello mostrato. `{"clear": true}`, senza altri campi, lo toglie subito.
+
+```json
+{"text": "Fumo in cucina", "level": "alert", "blink": true, "duration": 0}
+```
 
 ```sh
 curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
   -d '{"text":"Lavatrice finita","icon":"washing-machine","duration":60}' "$PROJECTOR_URL/api/message"
+```
+
+## Sveglia
+
+Il proiettore segue la prossima sveglia ricevuta nello snapshot di Home Assistant (`wake`). `GET /api/wake` restituisce le impostazioni salvate e la fase in corso:
+
+```json
+{"sunrise": 15, "screen": 5, "blink": false, "phase": "idle"}
+```
+
+| Campo | Valori |
+| --- | --- |
+| `sunrise` | Minuti di alba prima della sveglia, 0–60; `0` (predefinito) la spegne. La luce sale da 1% alla luminosità impostata (`brightness`) lungo una curva quadratica, anche a proiezione spenta; se la proiezione è già accesa più forte, resta com'è |
+| `screen` | Minuti, 0–30, della schermata con saluto, ora, previsione di oggi e primo evento di oggi a partire dall'ora della sveglia; `0` (predefinito) non la mostra. Copre pagine e messaggi, tranne quelli con `level:"alert"` |
+| `blink` | `true` fa pulsare la luce per il primo minuto della sveglia |
+| `phase` | Solo in risposta: `idle`, `sunrise` (la luce sta salendo), `ringing` (dall'ora della sveglia, per il più lungo tra `screen` e il minuto di `blink`) |
+
+`POST /api/wake` salva uno o più tra `sunrise`, `screen` e `blink`. All'ora della sveglia la proiezione si accende (`power:true`, non salvato) e resta accesa anche dopo. La sveglia viene seguita se nello snapshot è nota, fresca e mancano al massimo `sunrise` minuti (o è in corso il suo minuto); da quel momento il proiettore conta da solo, quindi un nuovo snapshot con la sveglia successiva, o dati scaduti, non la interrompono, e la stessa sveglia non viene seguita due volte. Con `sunrise`, `screen` e `blink` tutti spenti il proiettore ignora la sveglia.
+
+Da soli, `{"dismiss":true}` ferma alba o sveglia in corso e `{"test":true}` ne avvia una di prova: un minuto di alba (se `sunrise` non è `0`) e poi la sveglia con le impostazioni salvate. Anche `POST /api/display` con `power:false` ferma alba e sveglia. Alba e lampeggio non ridisegnano il display: cambiano solo il LED.
+
+```sh
+curl -X POST -H "Authorization: Bearer $PROJECTOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"sunrise":20,"screen":5,"blink":false}' "$PROJECTOR_URL/api/wake"
 ```
 
 ## Rete, configurazione e OTA

@@ -152,11 +152,13 @@ Il proiettore mostra il termostato ma non lo comanda: per cambiare temperatura o
 
 Senza centrale d'allarme lo scudo resta grigio scuro; senza entità meteo la riga della previsione non compare. Puoi configurare solo i dati che hai disponibili. I widget aggiuntivi non configurati mostrano **Dato HA ?**. I numeri di aperture e di luci accese sono contati dai nomi, non da sensori di conteggio: un aiutante come `sensor.number_lights_on` includerebbe anche la proiezione stessa ogni volta che è accesa. Accendere o spegnere una luce o aprire un contatto dell'elenco aggiorna subito il display.
 
-L'integrazione espone una **luce** (accensione e luminosità), una **selezione pagina**, la selezione **Stagione termostato** (solo con entrambi i termostati configurati), i pulsanti **Pagina precedente** e **Pagina successiva**, il numero **Ritorno alla pagina Ora** (secondi, 0 = mai) e, tra i dati diagnostici, i sensori di attività e memoria libera. Aperture, luci e allarme non sono riesposti: sono dati che il proiettore riceve da Home Assistant stesso. La selezione pagina mostra i nomi delle pagine. Dalla scheda del dispositivo in Home Assistant, **Visita** apre direttamente la web UI. Le automazioni HA possono usare direttamente queste entità. Per esempio, un'automazione che si attiva quando suona la sveglia può selezionare la pagina Meteo; trascorso il tempo di ritorno il proiettore torna all'ora.
+L'integrazione espone una **luce** (accensione e luminosità), una **selezione pagina**, la selezione **Stagione termostato** (solo con entrambi i termostati configurati), i pulsanti **Pagina precedente**, **Pagina successiva** e **Ferma sveglia**, i numeri **Ritorno alla pagina Ora** (secondi, 0 = mai) e **Rotazione pagine** (secondi, 0 = spenta) e, tra i dati diagnostici, i sensori di attività e memoria libera. Aperture, luci e allarme non sono riesposti: sono dati che il proiettore riceve da Home Assistant stesso. La selezione pagina mostra i nomi delle pagine. Dalla scheda del dispositivo in Home Assistant, **Visita** apre direttamente la web UI. Le automazioni HA possono usare direttamente queste entità. Per esempio, un'automazione che si attiva quando suona la sveglia può selezionare la pagina Meteo; trascorso il tempo di ritorno il proiettore torna all'ora.
 
 ### Messaggi dalle automazioni
 
-L'azione **Bed Projector: Mostra messaggio** (`bed_projector.show_message`) proietta un testo, al massimo 63 byte, con un'icona sopra, al posto della pagina corrente. Il messaggio scompare dopo la durata scelta (5–3600 secondi, predefinita 30) e il proiettore torna alla pagina di prima. **Togli messaggio** (`bed_projector.clear_message`) lo toglie subito. Un nuovo messaggio sostituisce il precedente; un riavvio del proiettore lo cancella. Le icone disponibili sono campanella (predefinita), informazione, avviso, lavatrice, pacco, porta aperta, luce accesa, telefono, sveglia e calendario. Il carattere `#` viene tolto dal testo.
+L'azione **Bed Projector: Mostra messaggio** (`bed_projector.show_message`) proietta un testo, al massimo 63 byte, con un'icona sopra, al posto della pagina corrente. Il messaggio scompare dopo la durata scelta (5–3600 secondi, predefinita 30) e il proiettore torna alla pagina di prima; con durata `0` resta finché non lo togli.
+
+Il **Livello** cambia il colore: **Informazione** (icona gialla, predefinito), **Avviso** (arancione) e **Allarme** (icona e testo rossi). Se non scegli un'icona, avviso e allarme mostrano un triangolo. Con **Lampeggio** la proiezione pulsa per il primo minuto, poi resta accesa fissa finché il messaggio è mostrato: si accende anche se era spenta e torna come prima quando il messaggio scompare. Va bene per gli avvisi che devono svegliare, meno per quelli di tutti i giorni. **Togli messaggio** (`bed_projector.clear_message`) lo toglie subito. Un nuovo messaggio sostituisce il precedente; un riavvio del proiettore lo cancella. Le icone disponibili sono campanella (predefinita), informazione, avviso, lavatrice, pacco, porta aperta, luce accesa, telefono, sveglia e calendario. Il carattere `#` viene tolto dal testo.
 
 ```yaml
 alias: Avvisa quando la lavatrice ha finito
@@ -173,6 +175,19 @@ actions:
       duration: 120
 ```
 
+Un avviso urgente, che resta finché non viene tolto:
+
+```yaml
+actions:
+  - action: bed_projector.show_message
+    data:
+      config_entry_id: <scegli il proiettore nell'editor visuale>
+      message: Acqua in lavanderia
+      level: alert
+      blink: true
+      duration: 0
+```
+
 Home Assistant invia lo stato iniziale, i cambiamenti delle entità selezionate e un riepilogo ogni 60 secondi. Se non arrivano aggiornamenti per 120 secondi, il proiettore mostra `?` per i dati domotici ma continua a mostrare l'ora.
 
 ## 5. Uso quotidiano
@@ -183,7 +198,7 @@ Le pagine usano Montserrat (testo in SemiBold, temperature in Bold, con le lette
 
 Qui sotto ogni pagina è descritta con le impostazioni predefinite. Dalla web UI puoi cambiare colori e dimensione del testo e decidere, elemento per elemento, se e come mostrarlo: vedi [Modificare le pagine](#modificare-le-pagine).
 
-**Ora** (sempre la prima pagina), dall'alto:
+**Ora** (la prima pagina, a meno che tu scelga il Quadrante), dall'alto:
 
 1. Icona della previsione, massima (arancione) e minima (azzurra) in grassetto. Fino alle 20:59 è la previsione di oggi, dalle 21:00 quella di domani (l'ora si cambia dalla web UI). La riga manca se il meteo non è configurato o i dati sono scaduti.
 2. L'ora.
@@ -193,6 +208,8 @@ Qui sotto ogni pagina è descritta con le impostazioni predefinite. Dalla web UI
 **Casa**: modalità dell'allarme con icona e nome, temperatura della camera (icona letto) e quella esterna (icona albero), poi una riga con i nomi delle porte/finestre aperte (`Finestra Sala · Finestra Cucina`, oppure **Tutto chiuso**) e una con i nomi delle luci accese (oppure **Luci spente**). Se gli elenchi superano otto nomi compare `+N`.
 
 **Agenda**: icona della sveglia con l'ora della prossima sveglia e, sotto, **Oggi**, **Domani** o il giorno della settimana; poi, dopo una linea, fino a tre eventi del calendario, ciascuno con l'ora (o il giorno, se non è oggi) seguita dal titolo, che scorre se è lungo. Gli eventi di tutto il giorno e quelli iniziati prima di oggi non hanno l'ora. Senza sveglia compare **Nessuna sveglia**, senza eventi **Nessun evento**; se il sensore o i calendari non sono configurati, non sono disponibili o i dati sono scaduti compare `?`. L'app Companion per Android rende il sensore della sveglia `unavailable` quando non c'è nessuna sveglia: in quel caso il proiettore mostra **Sveglia ?**.
+
+**Quadrante**: un orologio come quello di uno smartwatch, che puoi usare anche come prima pagina al posto di Ora. Con le **lancette** (predefinito) ha tacche delle ore e dei minuti sul bordo, oppure i numeri 12, 3, 6 e 9; in versione **digitale** mostra l'ora in cifre al centro. Intorno puoi mettere fino a quattro **complicazioni**, cioè piccoli dati con l'icona sopra al valore: in alto, a destra, in basso e a sinistra. Ogni complicazione mostra la forma breve del dato (la temperatura per il meteo, `Sab 10` per la data, l'ora della sveglia, la prossima tra alba e tramonto, la temperatura impostata del termostato); un valore troppo lungo viene accorciato con `…`. Le lancette passano sopra le complicazioni e si muovono a scatti di un minuto (quella delle ore ogni 12 minuti); non c'è la lancetta dei secondi, perché il proiettore ridisegna la pagina una volta al minuto. Con i numeri, una complicazione prende il posto del numero accanto; nella versione digitale le complicazioni di sinistra e destra stanno affiancate sotto l'ora e, se non c'è spazio, perdono l'icona.
 
 **Termostato**: una rotella di tacche, come la ghiera di un termostato, arancione per i caloriferi e azzurra per il condizionatore. Le tacche si colorano dall'inizio della scala fino alla temperatura impostata, segnata da una tacca più lunga; una tacca bianca indica la temperatura della stanza. La scala va normalmente da 10 a 30 °C, ristretta ai limiti del termostato e allargata se la temperatura impostata ne esce. Al centro, dall'alto: lo stato con la sua icona (**Riscalda**, **Raffresca**, **In pausa**, **Deumidifica**, **Ventilazione**…, seguito dal preset, per esempio `Eco`), la temperatura impostata in grande e, con l'icona del termometro, quella della stanza; in basso, nello spazio libero della rotella, l'umidità se il termostato la fornisce. Quando il termostato lavora la rotella è accesa, in pausa è più tenue. Da spento compaiono **Spento**, la temperatura della stanza in grigio e il nome dell'apparecchio (**Caloriferi** o **Condizionatore**). Se il termostato non è configurato, non è disponibile o i dati sono scaduti compaiono **Clima ?** e `--°`.
 
@@ -222,6 +239,20 @@ Un orario `--:--` e la scritta **In attesa dell'ora** indicano che la sincronizz
 
 Nella web UI la sezione **Proiezione** consente di accendere o spegnere la luce, scegliere la luminosità 1–100% (si applica appena rilasci il cursore), selezionare una pagina o scorrere. Lo stato si aggiorna da solo ogni 15 secondi. In Home Assistant usa la luce e la selezione pagina equivalenti. **Off** spegne la proiezione impostando il PWM a zero, ma la rete, il display e le API restano attivi; **On** ripristina l'ultimo livello. Stato e livello sopravvivono al riavvio.
 
+### Sveglia
+
+Il proiettore segue la prossima sveglia che arriva da Home Assistant: configura prima **Prossima sveglia** (e, se serve, **Sveglia attiva**) nelle opzioni dell'integrazione. Nella sezione **Sveglia** della web UI scegli cosa fa:
+
+| Impostazione | Effetto |
+| --- | --- |
+| **Luce dell'alba** (0–60 minuti, 0 = spenta) | Per quei minuti prima della sveglia la luce sale piano da 1% alla luminosità di **Proiezione**, anche se la proiezione è spenta. Se è già accesa più forte resta com'è. |
+| **Schermata Buongiorno** (0–30 minuti, 0 = spenta) | Dall'ora della sveglia mostra il saluto (**Buongiorno**, la sera **Buonasera**), l'ora, la previsione di oggi con massima e minima e il primo evento di oggi. Copre le pagine e i messaggi normali; un messaggio di livello **Allarme** resta sopra. Dati sconosciuti appaiono come `?`. |
+| **Lampeggio** | All'ora della sveglia la luce pulsa per un minuto. |
+
+All'ora della sveglia la proiezione si accende e resta accesa: spegnila da web UI o da Home Assistant quando ti alzi. Per fermare prima alba, schermata o lampeggio usa **Ferma** nella web UI, il pulsante **Ferma sveglia** in Home Assistant (per esempio da un'automazione che parte quando spegni la sveglia sul telefono) oppure spegni la proiezione. **Prova sveglia** fa vedere subito il risultato: un minuto di alba (se è attiva) e poi la sveglia, con le impostazioni salvate.
+
+Il proiettore inizia a seguire una sveglia quando mancano i minuti dell'alba e da lì conta da solo: se nel frattempo Home Assistant passa alla sveglia del giorno dopo o smette di rispondere, l'alba continua. Dopo un riavvio durante l'alba, l'alba riprende al punto giusto appena arriva il primo aggiornamento da Home Assistant (entro un minuto). L'orario è quello del muro, quindi la notte del cambio dell'ora legale l'alba può partire un'ora prima o dopo.
+
 ### Centrare e orientare l'area circolare
 
 Nella web UI apri **Centraggio e orientamento** e premi **Avvia regolazione**. Il display mostra una croce, la circonferenza che delimita l'area usata da tutte le pagine e la scritta **SU**. Usa le frecce per spostare il centro di un pixel alla volta; **Riduci** e **Aumenta** cambiano il diametro di due pixel. Il cerchio resta interamente nei 128×128 pixel del display: se una direzione non è disponibile, riduci prima il diametro. **Ruota 90°** gira il contenuto di un quarto di giro alla volta; **Specchia** lo ribalta, utile quando la lente o uno specchio invertono l'immagine. Regola finché la scritta **SU** è leggibile e rivolta verso l'alto. Rotazione e specchiatura non spostano il cerchio, quindi il centraggio resta valido. Alla fine premi **Salva regolazione**; **Annulla** ripristina geometria e orientamento precedenti. Solo il salvataggio scrive nella memoria persistente.
@@ -230,7 +261,7 @@ Il diametro iniziale è 112 pixel, centrato su (64, 64); puoi impostarlo tra 80 
 
 ### Modificare le pagine
 
-Apri **Pagine e aspetto** nella web UI. Puoi rinominare le pagine, scegliere il modello delle pagine secondarie, spostarle con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine: fino ad allora le modifiche restano una bozza, che non va persa se nel frattempo usi gli altri comandi della pagina. Un nome o un testo troppo lungo viene segnalato prima dell'invio.
+Apri **Pagine e aspetto** nella web UI. Puoi rinominare le pagine, scegliere il modello di ogni pagina (per la prima, Ora classica o Quadrante), spostarle con **Su/Giù**, aggiungerne o rimuoverne fino a un totale di cinque. Premi **Salva pagine** alla fine: fino ad allora le modifiche restano una bozza, che non va persa se nel frattempo usi gli altri comandi della pagina. Un nome o un testo troppo lungo viene segnalato prima dell'invio.
 
 **Provare prima di salvare.** Ogni pagina ha il pulsante **Prova sul proiettore**: il proiettore mostra subito la bozza (tema compreso) aperta su quella pagina, senza salvarla e senza tornare alla pagina Ora. Puoi cambiare ancora e premere di nuovo **Prova**. **Salva pagine** rende definitiva la bozza; **Annulla prova** torna alla configurazione salvata, e lo stesso succede da solo dopo 2 minuti o con un riavvio.
 
@@ -253,6 +284,7 @@ Per **ogni pagina**:
 | **Agenda** | **Sveglia**: ora e giorno, solo ora, nascosta · **Eventi**: fino a 3, fino a 2, solo il prossimo, nascosti · **Quando inizia l'evento**: visibile o nascosto |
 | **Termostato** | **Rotella** (senza, il testo usa tutto il cerchio), **Preset**, **Temperatura della stanza**, **Umidità**: visibili o nascosti · **Stato**: icona e stato, solo stato, solo icona, nascosto |
 | **Elenco** | **Intestazione con il nome**: visibile o nascosta |
+| **Quadrante** | **Ora**: lancette, digitale · **Bordo**: tacche, numeri 12, 3, 6, 9 (con le lancette), nessuno · **Complicazioni** in alto, a destra, in basso e a sinistra: un dato della tabella di Elenco ciascuna, con **Icona e valore** (predefinito), **Solo valore** o **Etichetta e valore** |
 
 Un dato sconosciuto resta riconoscibile in ogni scelta: per esempio, con **Solo icona** la porta grigia mostra comunque il `?`.
 
@@ -274,10 +306,16 @@ Un dato sconosciuto resta riconoscibile in ogni scelta: per esempio, con **Solo 
 | **Prossimo evento** (`event`) | Primo evento del calendario, oppure **Nessun evento** | Calendario |
 | **Fase lunare** (`moon`) | Calcolata dal proiettore, non serve HA | Luna |
 | **Termostato** (`thermostat`) | `Termostato 21.5°, camera 19.3°`, oppure **Termostato spento** | Calorifero o condizionatore |
+| **Probabilità di pioggia** (`rain`) | `Pioggia 30%`, la probabilità di oggi | Ombrello |
+| **Umidità esterna** (`humidity`) | `Umidità 71%`, dall'entità meteo | Goccia |
+| **Vento** (`wind`) | `Vento 12 km/h`, dall'entità meteo | Vento |
+| **Conto alla rovescia** (`countdown`) | `Natale: 75 giorni`, poi `domani`, `oggi`, `ieri`, `3 giorni fa`. Nel campo **Data e nome** scrivi la data come `2026-12-24` seguita da uno spazio e dal nome (facoltativo) | Calendario |
 
-Le pagine preconfigurate sono **Ora**, **Casa** e **Meteo**. Il nome della pagina è lungo al massimo 16 byte e ogni testo libero 32 byte: con caratteri accentati il limite in caratteri può essere inferiore.
+Le pagine preconfigurate sono **Ora**, **Casa** e **Meteo**. Il nome della pagina è lungo al massimo 16 byte e ogni testo libero (o data e nome del conto alla rovescia) 32 byte: con caratteri accentati il limite in caratteri può essere inferiore.
 
 L'ordine delle pagine definisce **precedente/successiva**. Selezionando una pagina secondaria da web UI o HA, la pagina Ora torna automaticamente dopo il tempo impostato in **Proiezione → Ritorno alla pagina Ora** (web UI) o con l'entità **Ritorno alla pagina Ora** (HA): da 5 a 3600 secondi, predefinito 30; con `0` la pagina scelta resta visibile. Il tempo resta salvato al riavvio, la pagina scelta no.
+
+Con **Proiezione → Rotazione delle pagine** (web UI) o l'entità **Rotazione pagine** (HA) le pagine si alternano da sole, Ora compresa, ogni 5–600 secondi; `0` (predefinito) la spegne. Mentre la rotazione è accesa il ritorno alla pagina Ora non si applica. La rotazione si ferma mentre sono mostrati un messaggio o una prova delle pagine, e riparte da capo quando scegli una pagina a mano. Per esempio, un'automazione può accenderla al mattino e spegnerla la sera.
 
 ## 6. Aggiornamenti
 
@@ -302,6 +340,7 @@ Il browser salva il token nel proprio archivio locale. **Rimuovi token da questo
 | Il dispositivo mostra `--:--` | Controlla Wi-Fi, DNS e accesso NTP a `pool.ntp.org`; attendi la sincronizzazione. |
 | Aperture, luci, allarme o meteo mostrano `?` | Configura le entità nelle opzioni HA, verifica che siano disponibili e che HA possa raggiungere l'IP del proiettore. Dopo 120 secondi senza snapshot i dati scadono. |
 | La pagina torna da sola a Ora | È il comportamento previsto: regola o disattiva (`0`) il **Ritorno alla pagina Ora** dalla web UI o da HA. |
+| Le pagine cambiano da sole | È accesa la **Rotazione delle pagine**: mettila a `0` dalla web UI o da HA. |
 | L'access point non compare | Con Wi-Fi valido nel `.env` il dispositivo si collega direttamente: è il comportamento previsto. Per forzare l'AP, rendi temporaneamente indisponibile quella rete e riavvia; attendi circa 20 secondi. |
 | `/api/pair` restituisce `403` | Accedi da un client collegato all'AP `bed-projector` usando `http://192.168.4.1`; dalla LAN l'abbinamento è disabilitato. |
 | Dopo il cambio Wi-Fi il browser richiede di nuovo il token | È normale: l'indirizzo del sito è cambiato. Reinserisci `API_TOKEN` dal `.env`. |
