@@ -103,6 +103,7 @@ static void sample(projector_snapshot_t *s, bool busy)
     s->ha.temp_now = 17;
     s->ha.humidity = 71;
     s->ha.wake_known = true;
+    s->ha.wake_enabled = true;
     s->ha.events_known = true;
     if (busy) {
         snprintf(s->ha.wake_date, sizeof(s->ha.wake_date), "2026-10-11");
@@ -139,6 +140,7 @@ static void list_widgets(projector_snapshot_t *s, const int *types, int style, i
 static void wake_time(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_TIME; }
 static void wake_countdown(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_COUNTDOWN; }
 static void wake_none(projector_snapshot_t *s) { s->pages[0].show[CLOCK_WAKE] = WAKE_OFF; }
+static void wake_disabled(projector_snapshot_t *s) { s->ha.wake_enabled = false; }
 static void list_rooms(projector_snapshot_t *s)
 {
     list_widgets(s, (const int[]){WIDGET_INDOOR, WIDGET_OUTDOOR, WIDGET_SUN}, STYLE_LABEL_VALUE, 3);
@@ -403,6 +405,7 @@ int main(int argc, char **argv)
         {"wake_under_alert", 2, true, afternoon, 112, wake_ringing_alert, "Fumo in cucina"},
         {"list_outdoor", 4, true, afternoon, 112, list_outdoor},
         {"list_outdoor_labels", 4, true, afternoon, 112, list_outdoor_labels},
+        {"clock_night_disabled", 0, true, night, 112, wake_disabled},
     };
     for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); ++i) {
         static projector_snapshot_t s;

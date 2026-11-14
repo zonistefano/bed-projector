@@ -908,6 +908,7 @@ static bool parse_ha(const cJSON *root, projector_ha_t *out)
         return false;
     strcpy(out->alarm, alarm->valuestring);
     out->wake_known = cJSON_IsTrue(FIELD("wake_known"));
+    out->wake_enabled = cJSON_IsTrue(FIELD("wake_enabled"));
     out->events_known = cJSON_IsTrue(FIELD("events_known"));
     int index = 0;
     const cJSON *item;
@@ -927,7 +928,8 @@ static bool parse_ha(const cJSON *root, projector_ha_t *out)
         parse_text(FIELD("wind"), out->wind, sizeof(out->wind)) &&
         parse_degrees(FIELD("temp_now"), &out->temp_now_known, &out->temp_now) &&
         parse_percent(FIELD("humidity"), &out->humidity) &&
-        cJSON_IsBool(FIELD("wake_known")) && parse_wake(FIELD("wake"), out) &&
+        cJSON_IsBool(FIELD("wake_known")) && cJSON_IsBool(FIELD("wake_enabled")) &&
+        parse_wake(FIELD("wake"), out) &&
         cJSON_IsBool(FIELD("events_known")) &&
         parse_events(FIELD("events"), out->events, &out->event_count) &&
         parse_thermostat(FIELD("thermostat"), &out->thermostat);

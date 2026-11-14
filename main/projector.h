@@ -126,6 +126,7 @@ typedef struct {
     int8_t humidity;  /* Percent or PROJECTOR_UNKNOWN_PERCENT. */
     projector_day_t days[PROJECTOR_FORECAST_DAYS];
     bool wake_known;   /* The next-alarm sensor is configured and available. */
+    bool wake_enabled; /* The optional HA switch is on, or no switch is configured. */
     char wake_date[11]; /* Next phone alarm, HA local date and HH:MM; empty if none. */
     char wake_time[6];
     bool events_known;

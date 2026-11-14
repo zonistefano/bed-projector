@@ -595,9 +595,8 @@ static void render_clock(const projector_snapshot_t *s, const projector_page_t *
 
     /* Status icons appear only when something needs attention. An unusable door
      * count must never look like "all closed", so it shows as a grey "?", even when
-     * the page shows icons alone. The morning alarm is the exception: a known "none"
-     * shows as a dim crossed bell, while an unknown one is left out rather than
-     * passing for either. */
+     * the page shows icons alone. An enabled alarm with no morning alarm shows as
+     * a dim crossed bell; a disabled or unknown alarm has no icon. */
     int doors_mode = page->show[CLOCK_OPENINGS], lights_mode = page->show[CLOCK_LIGHTS];
     int wake_mode = page->show[CLOCK_WAKE];
     bool doors_known = s->ha_fresh && s->ha.openings_known;
@@ -608,7 +607,8 @@ static void render_clock(const projector_snapshot_t *s, const projector_page_t *
     char door_count[4] = "?", light_count[4];
     if (doors_known) snprintf(door_count, sizeof(door_count), "%u", s->ha.openings);
     snprintf(light_count, sizeof(light_count), "%u", s->ha.lights);
-    bool wake_known = valid_time && s->ha_fresh && s->ha.wake_known && wake_mode != WAKE_OFF;
+    bool wake_known = valid_time && s->ha_fresh && s->ha.wake_known &&
+                      s->ha.wake_enabled && wake_mode != WAKE_OFF;
     int wake_day = wake_known && s->ha.wake_date[0] ?
         projector_relative_day(local->tm_year + 1900, local->tm_mon + 1, local->tm_mday,
                                s->ha.wake_date) : -1;
