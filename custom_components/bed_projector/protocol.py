@@ -441,7 +441,8 @@ def make_snapshot(states: dict[str, Any], options: dict[str, Any], *,
         source = entity(key)
         return str(source.state) if available(source) else ""
 
-    wake_known, wake = (wake_time(entity(CONF_NEXT_ALARM), now, entity(CONF_NEXT_ALARM_ENABLED))
+    wake_switch = entity(CONF_NEXT_ALARM_ENABLED)
+    wake_known, wake = (wake_time(entity(CONF_NEXT_ALARM), now, wake_switch)
                         if now is not None else (False, None))
     source = thermostat_source(states, options, season, today.month if today is not None else None)
     climate = None
@@ -473,6 +474,7 @@ def make_snapshot(states: dict[str, Any], options: dict[str, Any], *,
                               (summary(CONF_SUMMARY_TODAY), summary(CONF_SUMMARY_TOMORROW)))
         if today is not None and tz is not None else [],
         "wake_known": wake_known,
+        "wake_enabled": wake_known and (wake_switch is None or wake_switch.state == "on"),
         "wake": wake,
         "events_known": events_known,
         "events": upcoming_events(events, now) if events_known else [],

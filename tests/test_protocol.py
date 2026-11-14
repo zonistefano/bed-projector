@@ -220,13 +220,24 @@ class AgendaTests(unittest.TestCase):
         result = protocol.make_snapshot(states, options, now=NOW)
         self.assertEqual((result["wake_known"], result["wake"]),
                          (True, {"date": "2026-10-11", "time": "06:45"}))
+        self.assertTrue(result["wake_enabled"])
         disabled = {**options, "next_alarm_enabled": "input_boolean.wake_enabled"}
+        on = {**states, "input_boolean.wake_enabled": state("on")}
+        self.assertTrue(protocol.make_snapshot(on, disabled, now=NOW)["wake_enabled"])
+        past = {**on, "sensor.phone_next_alarm": state("2026-10-09T04:45:00+00:00")}
+        result = protocol.make_snapshot(past, disabled, now=NOW)
+        self.assertEqual((result["wake_known"], result["wake_enabled"], result["wake"]),
+                         (True, True, None))
         off = {**states, "input_boolean.wake_enabled": state("off")}
         result = protocol.make_snapshot(off, disabled, now=NOW)
         self.assertEqual((result["wake_known"], result["wake"]), (True, None))
+        self.assertFalse(result["wake_enabled"])
+        unavailable = {**states, "input_boolean.wake_enabled": state("unavailable")}
+        self.assertFalse(protocol.make_snapshot(unavailable, disabled, now=NOW)["wake_enabled"])
         self.assertEqual((result["events_known"], result["events"]), (False, []))
         result = protocol.make_snapshot({}, {}, now=NOW)
         self.assertEqual((result["wake_known"], result["wake"]), (False, None))
+        self.assertFalse(result["wake_enabled"])
         self.assertFalse(protocol.make_snapshot(states, options)["wake_known"])
 
     def test_upcoming_events(self):
