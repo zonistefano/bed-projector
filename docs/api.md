@@ -272,6 +272,7 @@ Il componente incluso invia uno snapshot completo all'avvio, ai cambiamenti dell
      "sunrise": "07:35", "sunset": "18:45", "summary": "", "day": null, "evening": null}
   ],
   "wake_known": true,
+  "wake_enabled": true,
   "wake": {"date": "2026-10-11", "time": "06:45"},
   "events_known": true,
   "events": [
@@ -294,6 +295,7 @@ Campi obbligatori:
 - `alarm` ammette `disarmed`, `armed_home`, `armed_away`, `armed_night`, `armed_vacation`, `armed_custom_bypass`, `arming`, `pending`, `triggered`, `unknown`.
 - `weather` (condizione attuale di HA, massimo 31 byte UTF-8), `temperature` (15 byte) ed `extras` (fino a quattro valori da 31 byte).
 - `wake_known` ed `events_known` (booleani): `false` quando l'entità della sveglia (sensore timestamp o `input_datetime`), l'eventuale interruttore che la attiva o i calendari non sono configurati o non sono disponibili. Il display mostra allora `?`, mai "nessuna sveglia" o "nessun evento".
+- `wake_enabled` (booleano): `true` quando la sveglia è nota e l'interruttore **Sveglia attiva** è acceso; se l'interruttore non è configurato, segue `wake_known`. Nella pagina Ora l'icona scompare quando è `false`.
 
 Campi facoltativi: se mancano o sono `null` il dato è sconosciuto; se presenti devono essere validi, altrimenti l'intero snapshot è rifiutato.
 
